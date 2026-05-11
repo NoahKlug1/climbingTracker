@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderWorkoutDateDisplay();
 
   // Default sleep date
-  document.getElementById('sleepDate').value = now.toISOString().split('T')[0];
+  document.getElementById('sleepDate').value = workoutDate;
 
   renderExerciseList();
   renderHistory();
