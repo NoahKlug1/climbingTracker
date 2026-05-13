@@ -1,3 +1,12 @@
+<?php
+require 'db.php';
+
+$stmt = $pdo->query("SELECT * FROM users");
+
+while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    echo $row['username'] . "<br>";
+}
+?>
 <!DOCTYPE html>
 <html lang="de">
 <head>
