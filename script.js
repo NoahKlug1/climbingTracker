@@ -1034,3 +1034,66 @@ window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   deferredPrompt = e;
 });
+
+const supabaseUrl = "https://fdgtzilbwjiuetrheoly.supabase.co"
+const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkZ3R6aWxid2ppdWV0cmhlb2x5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NjczOTksImV4cCI6MjA5NDI0MzM5OX0.4SPYm4eypp7o143faPEkLAltsptS6iT1JHAitfhQEfY"
+
+const client = supabase.createClient(
+  supabaseUrl,
+  supabaseKey
+)
+
+async function register(){
+
+  const email = document.getElementById("email").value
+  const password = document.getElementById("password").value
+
+  const { data, error } = await client.auth.signUp({
+    email,
+    password
+  })
+
+  if(error){
+    document.getElementById("status").innerText = error.message
+    return
+  }
+
+  document.getElementById("status").innerText =
+    "Registrierung erfolgreich!"
+}
+
+async function login(){
+
+  const email = document.getElementById("email").value
+  const password = document.getElementById("password").value
+
+  const { data, error } =
+    await client.auth.signInWithPassword({
+      email,
+      password
+    })
+
+  if(error){
+    document.getElementById("status").innerText = error.message
+    return
+  }
+
+  document.getElementById("status").innerText =
+    "Eingeloggt!"
+}
+
+async function logout(){
+
+  await client.auth.signOut()
+
+  document.getElementById("status").innerText =
+    "Ausgeloggt!"
+}
+
+const {
+  data: { session }
+} = await client.auth.getSession()
+
+if(session){
+  console.log("User eingeloggt")
+}

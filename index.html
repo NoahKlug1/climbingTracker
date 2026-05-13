@@ -11,6 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 <script src="script.js" defer></script>
 </head>
 <body>
@@ -45,6 +46,20 @@
 
 <!-- === VIEW: LOG === -->
 <div class="view active" id="view-log">
+  <div class="box">
+
+    <h2>Login</h2>
+
+    <input type="email" id="email" placeholder="Email">
+    <input type="password" id="password" placeholder="Passwort">
+
+    <button onclick="register()">Registrieren</button>
+    <button onclick="login()">Login</button>
+    <button onclick="logout()">Logout</button>
+
+    <div id="status"></div>
+
+  </div>
   <div class="date-display" id="currentDateDisplay" style="position:relative;cursor:pointer;"></div>
   <div class="section-title">WORKOUT LOG</div>
   <div class="section-sub">Wähle eine Übung und erfasse deine Sets</div>
