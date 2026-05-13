@@ -1,12 +1,3 @@
-<?php
-require 'db.php';
-
-$stmt = $pdo->query("SELECT * FROM users");
-
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    echo $row['username'] . "<br>";
-}
-?>
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -19,10 +10,8 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
 <title>CrimpLog</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<?php
-  echo '<link    href="style.css'   . '?' . time() . '" rel="stylesheet">';
-  echo '<script  src="script.js'    . '?' . time() . '" defer></script>';
-?>
+<link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
 
