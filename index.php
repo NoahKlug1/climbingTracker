@@ -19,8 +19,10 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
 <title>CrimpLog</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css">
-<script src="script.js"></script>
+<?php
+  echo '<link    href="style.css'   . '?' . time() . '" rel="stylesheet">';
+  echo '<script  src="script.js'    . '?' . time() . '" defer></script>';
+?>
 </head>
 <body>
 
