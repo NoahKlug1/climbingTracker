@@ -296,7 +296,7 @@ function stepChange(fieldId, delta) {
   if (el) {
     el.textContent = formatStepperVal(val, field);
     el.style.animation = 'none';
-    requestAnimationFrame(() => { el.style.animation = 'popIn 0.2s ease'; });
+    requestAnimationFrame(() => { el.style.animation = 'popInSimple 0.2s ease'; });
   }
 
   // Animate weight PR check
@@ -322,7 +322,7 @@ function openWeightInput(fieldId) {
   if (el) {
     el.textContent = val % 1 === 0 ? val : val.toFixed(1);
     el.style.animation = 'none';
-    requestAnimationFrame(() => { el.style.animation = 'popIn 0.2s ease'; });
+    requestAnimationFrame(() => { el.style.animation = 'popInSimple 0.2s ease'; });
   }
   if (fieldId === 'weight') checkAndShowPR();
 }
@@ -335,15 +335,14 @@ function renderWorkoutDateDisplay() {
   const today = new Date().toISOString().split('T')[0];
   const isToday = workoutDate === today;
   container.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="cursor:pointer;" onclick="document.getElementById('workoutDatePicker').showPicker ? document.getElementById('workoutDatePicker').showPicker() : document.getElementById('workoutDatePicker').click()">
-        📅 ${isToday ? 'Heute – ' : ''}${label}
-        <span style="font-size:0.65rem;opacity:0.6;margin-left:4px;">▼</span>
-      </span>
-      <input type="date" id="workoutDatePicker" value="${workoutDate}" max="${today}"
-        style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;"
-        onchange="setWorkoutDate(this.value)">
-      ${!isToday ? `<button onclick="setWorkoutDate('${today}')" style="font-size:0.65rem;padding:2px 8px;border:1px solid var(--rust2);background:none;color:var(--rust2);border-radius:4px;cursor:pointer;font-family:var(--font-h);letter-spacing:1px;">HEUTE</button>` : ''}
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:relative;">
+      <label style="cursor:pointer;display:flex;align-items:center;gap:6px;position:relative;">
+        <span class="date-label-text">📅 ${isToday ? 'Heute – ' : ''}${label} <span style="font-size:0.65rem;opacity:0.5;">▼</span></span>
+        <input type="date" value="${workoutDate}" max="${today}"
+          style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px;"
+          onchange="setWorkoutDate(this.value)">
+      </label>
+      ${!isToday ? `<button onclick="setWorkoutDate('${today}')" class="today-btn">HEUTE</button>` : ''}
     </div>`;
 }
 
@@ -381,7 +380,7 @@ function addSet() {
   // Animate add
   const rows = document.querySelectorAll('#setsTableBody tr');
   const last = rows[rows.length - 1];
-  if (last) { last.style.animation = 'none'; requestAnimationFrame(() => last.style.animation = 'popIn 0.3s ease'); }
+  if (last) { last.style.animation = 'none'; requestAnimationFrame(() => last.style.animation = 'popInSimple 0.3s ease'); }
 
   showToast(`Set ${currentSets.length} gespeichert!`);
   checkAndShowPR();
@@ -482,17 +481,16 @@ function renderHistory(filter = 'all') {
   });
 
   container.innerHTML = Object.entries(grouped).map(([date, ws]) => `
-    <div style="margin-bottom:14px;">
-      <div style="font-family:var(--font-h); font-size:0.9rem; letter-spacing:2px; color:var(--rust2); margin-bottom:6px; border-bottom:1px solid var(--stone); padding-bottom:4px;">${date}</div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:0.72rem; font-weight:600; color:var(--t3); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">${date}</div>
       ${ws.map(w => `
         <div class="history-item">
-          <div style="display:flex; justify-content:space-between; align-items:start;">
-            <div>
-              <div class="history-exercise">${w.exerciseIcon} ${w.exerciseName}</div>
-              <div class="history-detail">${summarizeSets(w)}</div>
-            </div>
-            <button onclick="deleteWorkout(${w.id})" style="background:none;border:none;color:var(--stone);font-size:0.9rem;padding:2px 6px;cursor:pointer;">✕</button>
+          <div style="font-size:1.5rem; width:42px; height:42px; background:var(--bg4); border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${w.exerciseIcon}</div>
+          <div style="flex:1; min-width:0;">
+            <div class="history-exercise">${w.exerciseName}</div>
+            <div class="history-detail">${summarizeSets(w)}</div>
           </div>
+          <button onclick="deleteWorkout(${w.id})" style="background:none;border:none;color:var(--t3);font-size:1.1rem;padding:2px 6px;cursor:pointer;flex-shrink:0;">✕</button>
         </div>
       `).join('')}
     </div>
