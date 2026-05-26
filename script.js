@@ -94,16 +94,23 @@ function hideUserMenu() {
 // ============================================================
 // DATABASE FUNCTIONS
 // ============================================================
-async function loadFromDB() {
+let isLoadingFromDB = false;
+
+async function loadFromDB(force = false) {
   if (!currentUser) return;
+  if (isLoadingFromDB) return; // prevent concurrent loads
+  isLoadingFromDB = true;
   setSyncing(true);
 
-  const [wRes, sRes] = await Promise.all([
-    db.from('workouts').select('*').eq('user_id', currentUser.id).order('workout_date', { ascending: false }),
-    db.from('sleep_entries').select('*').eq('user_id', currentUser.id).order('sleep_date', { ascending: false })
-  ]);
+  try {
+    const [wRes, sRes] = await Promise.all([
+      db.from('workouts').select('*').eq('user_id', currentUser.id).order('workout_date', { ascending: false }),
+      db.from('sleep_entries').select('*').eq('user_id', currentUser.id).order('sleep_date', { ascending: false })
+    ]);
 
-  if (wRes.data) {
+    if (wRes.error) throw wRes.error;
+    if (sRes.error) throw sRes.error;
+
     workouts = wRes.data.map(row => ({
       id: row.id,
       date: row.workout_date + 'T12:00:00.000Z',
@@ -113,9 +120,7 @@ async function loadFromDB() {
       sets: row.sets,
       notes: ''
     }));
-  }
 
-  if (sRes.data) {
     sleepData = sRes.data.map(row => ({
       id: row.id,
       date: row.sleep_date,
@@ -126,10 +131,18 @@ async function loadFromDB() {
       hrv: row.hrv,
       notes: row.notes || ''
     }));
-  }
 
-  setSyncing(false);
-  renderAll();
+    renderAll();
+  } catch (err) {
+    // Offline: keep whatever data we already have in memory
+    if (workouts.length === 0 && sleepData.length === 0) {
+      showToast('\u26a0\ufe0f Offline \u2013 keine Daten verf\u00fcgbar');
+    }
+    renderAll();
+  } finally {
+    setSyncing(false);
+    isLoadingFromDB = false;
+  }
 }
 
 async function saveWorkoutToDB(workout) {
@@ -337,6 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentUser = null;
       workouts = [];
       sleepData = [];
+      isLoadingFromDB = false;
       document.getElementById('appScreen').style.display = 'none';
       document.getElementById('authScreen').style.display = 'flex';
       document.getElementById('authBtn').dataset.mode = 'login';
@@ -344,7 +358,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (session?.user) {
+    // Only run full init on actual sign-in or initial session, not on token refresh
+    const isNewLogin = event === 'SIGNED_IN' || event === 'INITIAL_SESSION';
+    const userChanged = currentUser?.id !== session.user.id;
+
+    if (isNewLogin || userChanged) {
       currentUser = session.user;
       document.getElementById('authScreen').style.display = 'none';
       document.getElementById('appScreen').style.display = 'block';
@@ -358,6 +376,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       await loadFromDB();
+    } else {
+      // Token refresh etc. \u2013 just update user reference silently
+      currentUser = session.user;
+    }
+  });
+
+  // Reload fresh data when user comes back to the tab/app
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && currentUser) {
+      loadFromDB();
     }
   });
 });

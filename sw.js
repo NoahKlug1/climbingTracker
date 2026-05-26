@@ -1,43 +1,36 @@
-// CrimpLog Service Worker – v3 (network-first for HTML)
-const CACHE_NAME = 'crimplog-v3';
-const STATIC = ['./style.css', './script.js', './manifest.json'];
+// CrimpLog SW v4 – network-first always, offline fallback
+const CACHE = 'crimplog-v4';
+const OFFLINE_URLS = ['./index.html', './style.css', './script.js', './manifest.json'];
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC))
+    caches.open(CACHE).then(c => c.addAll(OFFLINE_URLS))
   );
+  // Take over immediately, don't wait for old SW to die
   self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+  // Never intercept Supabase or external API calls
+  if (!event.request.url.startsWith(self.location.origin)) return;
 
-  // Always network-first for HTML and Supabase API calls
-  if (event.request.mode === 'navigate' || url.hostname.includes('supabase.co')) {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match('./index.html'))
-    );
-    return;
-  }
-
-  // Cache-first for static assets
+  // Network-first for everything: try network, fall back to cache
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).then(response => {
+    fetch(event.request)
+      .then(response => {
+        // Update cache with fresh version
         const clone = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        caches.open(CACHE).then(c => c.put(event.request, clone));
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });
