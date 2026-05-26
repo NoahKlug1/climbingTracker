@@ -1,4 +1,196 @@
 // ============================================================
+// SUPABASE SETUP
+// ============================================================
+const SUPABASE_URL = 'https://fdgtzilbwjiuetrheoly.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkZ3R6aWxid2ppdWV0cmhlb2x5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NjczOTksImV4cCI6MjA5NDI0MzM5OX0.4SPYm4eypp7o143faPEkLAltsptS6iT1JHAitfhQEfY';
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentUser = null;
+
+// ============================================================
+// AUTH FUNCTIONS
+// ============================================================
+function showAuthMode(mode) {
+  document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  const btn = document.getElementById('authBtn');
+  btn.textContent = mode === 'login' ? 'ANMELDEN' : 'REGISTRIEREN';
+  btn.onclick = mode === 'login' ? handleAuth : handleAuth;
+  document.getElementById('authError').style.display = 'none';
+  // Store mode
+  btn.dataset.mode = mode;
+}
+
+function showAuthLoading(show) {
+  document.getElementById('authLoading').style.display = show ? 'flex' : 'none';
+  document.getElementById('authBtn').style.display = show ? 'none' : 'block';
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('authError');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function handleAuth() {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const mode = document.getElementById('authBtn').dataset.mode || 'login';
+
+  if (!email || !password) { showAuthError('Bitte E-Mail und Passwort eingeben.'); return; }
+  if (password.length < 6) { showAuthError('Passwort muss mindestens 6 Zeichen haben.'); return; }
+
+  showAuthLoading(true);
+  document.getElementById('authError').style.display = 'none';
+
+  let result;
+  if (mode === 'register') {
+    result = await db.auth.signUp({ email, password });
+    if (!result.error && result.data.user && !result.data.session) {
+      showAuthLoading(false);
+      showAuthError('✅ Bestätigungsmail gesendet! Bitte dein Postfach prüfen.');
+      return;
+    }
+  } else {
+    result = await db.auth.signInWithPassword({ email, password });
+  }
+
+  if (result.error) {
+    showAuthLoading(false);
+    const msgs = {
+      'Invalid login credentials': 'E-Mail oder Passwort falsch.',
+      'Email not confirmed': 'Bitte erst die E-Mail bestätigen.',
+      'User already registered': 'Diese E-Mail ist bereits registriert.'
+    };
+    showAuthError(msgs[result.error.message] || result.error.message);
+  }
+  // If success: onAuthStateChange fires automatically
+}
+
+async function handleGoogleAuth() {
+  const { error } = await db.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.href }
+  });
+  if (error) showAuthError('Google Login fehlgeschlagen: ' + error.message);
+}
+
+async function handleLogout() {
+  hideUserMenu();
+  await db.auth.signOut();
+  workouts = [];
+  sleepData = [];
+  currentUser = null;
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'flex';
+}
+
+function showUserMenu() {
+  document.getElementById('userMenu').style.display = 'block';
+  document.getElementById('userMenuOverlay').style.display = 'block';
+}
+function hideUserMenu() {
+  document.getElementById('userMenu').style.display = 'none';
+  document.getElementById('userMenuOverlay').style.display = 'none';
+}
+
+// ============================================================
+// DATABASE FUNCTIONS
+// ============================================================
+async function loadFromDB() {
+  if (!currentUser) return;
+  setSyncing(true);
+
+  const [wRes, sRes] = await Promise.all([
+    db.from('workouts').select('*').eq('user_id', currentUser.id).order('workout_date', { ascending: false }),
+    db.from('sleep_entries').select('*').eq('user_id', currentUser.id).order('sleep_date', { ascending: false })
+  ]);
+
+  if (wRes.data) {
+    workouts = wRes.data.map(row => ({
+      id: row.id,
+      date: row.workout_date + 'T12:00:00.000Z',
+      exerciseId: row.exercise_id,
+      exerciseName: row.exercise_name,
+      exerciseIcon: row.exercise_icon,
+      sets: row.sets,
+      notes: ''
+    }));
+  }
+
+  if (sRes.data) {
+    sleepData = sRes.data.map(row => ({
+      id: row.id,
+      date: row.sleep_date,
+      hours: parseFloat(row.hours) || 0,
+      quality: row.quality || 3,
+      bedtime: row.bedtime,
+      wakeup: row.wakeup,
+      hrv: row.hrv,
+      notes: row.notes || ''
+    }));
+  }
+
+  setSyncing(false);
+  renderAll();
+}
+
+async function saveWorkoutToDB(workout) {
+  if (!currentUser) return workout;
+  setSyncing(true);
+  const { data, error } = await db.from('workouts').insert({
+    user_id: currentUser.id,
+    workout_date: workout.date.split('T')[0],
+    exercise_id: workout.exerciseId,
+    exercise_name: workout.exerciseName,
+    exercise_icon: workout.exerciseIcon,
+    sets: workout.sets
+  }).select().single();
+  setSyncing(false);
+  if (error) { showToast('⚠️ Sync-Fehler: ' + error.message); return workout; }
+  return { ...workout, id: data.id };
+}
+
+async function deleteWorkoutFromDB(id) {
+  if (!currentUser) return;
+  setSyncing(true);
+  await db.from('workouts').delete().eq('id', id);
+  setSyncing(false);
+}
+
+async function saveSleepToDB(entry) {
+  if (!currentUser) return entry;
+  setSyncing(true);
+  const { data, error } = await db.from('sleep_entries').insert({
+    user_id: currentUser.id,
+    sleep_date: entry.date,
+    hours: entry.hours,
+    quality: entry.quality,
+    bedtime: entry.bedtime || null,
+    wakeup: entry.wakeup || null,
+    hrv: entry.hrv || null,
+    notes: entry.notes || ''
+  }).select().single();
+  setSyncing(false);
+  if (error) { showToast('⚠️ Sync-Fehler: ' + error.message); return entry; }
+  return { ...entry, id: data.id };
+}
+
+function setSyncing(active) {
+  const dot = document.getElementById('syncDot');
+  if (dot) dot.className = 'sync-dot' + (active ? ' syncing' : '');
+}
+
+function renderAll() {
+  renderExerciseList();
+  renderHistory();
+  renderStats();
+  renderSleepStats();
+  renderCoach();
+}
+
+// ============================================================
 // DATA & STATE
 // ============================================================
 const EXERCISES = [
@@ -140,19 +332,40 @@ let workoutDate = new Date().toISOString().split('T')[0]; // selected workout da
 // INIT
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-  // Set date display with picker
-  renderWorkoutDateDisplay();
+  // Listen for auth state changes
+  db.auth.onAuthStateChange(async (event, session) => {
+    if (session?.user) {
+      currentUser = session.user;
+      document.getElementById('authScreen').style.display = 'none';
+      document.getElementById('appScreen').style.display = 'block';
+      document.getElementById('userMenuEmail').textContent = currentUser.email || 'Eingeloggt';
 
-  // Default sleep date
-  document.getElementById('sleepDate').value = workoutDate;
+      // Set date display
+      renderWorkoutDateDisplay();
+      document.getElementById('sleepDate').value = workoutDate;
 
-  renderExerciseList();
-  renderHistory();
-  renderStats();
-  renderSleepStats();
-  renderCoach();
+      // Init nav
+      initNav();
 
-  // Nav tabs
+      // Register service worker
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      }
+
+      // Load data from Supabase
+      await loadFromDB();
+
+    } else {
+      currentUser = null;
+      document.getElementById('appScreen').style.display = 'none';
+      document.getElementById('authScreen').style.display = 'flex';
+      // Set default auth mode
+      document.getElementById('authBtn').dataset.mode = 'login';
+    }
+  });
+});
+
+function initNav() {
   document.querySelectorAll('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       const view = tab.dataset.view;
@@ -166,12 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (view === 'history') renderHistory();
     });
   });
-
-  // Register service worker
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  }
-});
+}
 
 // ============================================================
 // EXERCISE LIST
@@ -181,11 +389,13 @@ function renderExerciseList() {
   container.innerHTML = EXERCISES.map(ex => `
     <div class="exercise-card ${selectedExercise?.id === ex.id ? 'selected' : ''}"
          onclick="selectExercise('${ex.id}')">
-      <span class="exercise-icon">${ex.icon}</span>
-      <div class="exercise-name">${ex.name}</div>
-      <div class="exercise-desc">${ex.desc}</div>
-      <div class="exercise-tags">
-        ${ex.tags.map(t => `<span class="tag tag-${t}">${t.toUpperCase()}</span>`).join('')}
+      <div class="exercise-icon">${ex.icon}</div>
+      <div class="exercise-info">
+        <div class="exercise-name">${ex.name}</div>
+        <div class="exercise-desc">${ex.desc}</div>
+        <div class="exercise-tags">
+          ${ex.tags.map(t => `<span class="tag tag-${t}">${t.toUpperCase()}</span>`).join('')}
+        </div>
       </div>
     </div>
   `).join('');
@@ -420,13 +630,13 @@ function renderSetsTable() {
 // ============================================================
 // SAVE WORKOUT
 // ============================================================
-function saveWorkout() {
+async function saveWorkout() {
   if (!selectedExercise || currentSets.length === 0) {
     showToast('Füge zuerst mindestens 1 Set hinzu!');
     return;
   }
 
-  const workout = {
+  let workout = {
     id: Date.now(),
     date: workoutDate + 'T12:00:00.000Z',
     exerciseId: selectedExercise.id,
@@ -436,10 +646,11 @@ function saveWorkout() {
     notes: ''
   };
 
+  // Save to Supabase (get real UUID back)
+  workout = await saveWorkoutToDB(workout);
   workouts.unshift(workout);
-  saveData('cl_workouts', workouts);
 
-  // Big animation
+  // Animation
   const fig = document.getElementById('animFigure');
   fig.style.animation = 'none';
   requestAnimationFrame(() => { fig.style.animation = 'weightPulse 0.6s ease'; });
@@ -518,9 +729,9 @@ function summarizeSets(workout) {
   return parts.join(' · ');
 }
 
-function deleteWorkout(id) {
+async function deleteWorkout(id) {
+  await deleteWorkoutFromDB(id);
   workouts = workouts.filter(w => w.id !== id);
-  saveData('cl_workouts', workouts);
   renderHistory();
   showToast('Workout gelöscht');
 }
@@ -727,7 +938,7 @@ function checkAndShowPR() {
 // ============================================================
 // SLEEP
 // ============================================================
-function saveSleepEntry() {
+async function saveSleepEntry() {
   const date = document.getElementById('sleepDate').value;
   const bedtime = document.getElementById('sleepBedtime').value;
   const wakeup = document.getElementById('sleepWakeup').value;
@@ -737,24 +948,22 @@ function saveSleepEntry() {
 
   if (!date || !bedtime || !wakeup) { showToast('Bitte Datum & Zeiten eingeben!'); return; }
 
-  // Calculate hours
   const bed = parseTime(bedtime);
   const wake = parseTime(wakeup);
   let hours = (wake - bed) / 3600;
   if (hours < 0) hours += 24;
 
-  const entry = { id: Date.now(), date, bedtime, wakeup, hours: Math.round(hours * 10) / 10, quality, hrv, notes };
+  let entry = { id: Date.now(), date, bedtime, wakeup, hours: Math.round(hours * 10) / 10, quality, hrv, notes };
 
-  // Remove existing entry for same date
+  // Save to Supabase
+  entry = await saveSleepToDB(entry);
+
   sleepData = sleepData.filter(s => s.date !== date);
   sleepData.unshift(entry);
   sleepData.sort((a, b) => new Date(b.date) - new Date(a.date));
-  saveData('cl_sleep', sleepData);
 
   showToast('💤 Schlafdaten gespeichert!');
   renderSleepStats();
-
-  // Reset
   document.getElementById('sleepNotes').value = '';
   document.getElementById('sleepHRV').value = '';
 }
@@ -1034,65 +1243,3 @@ window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   deferredPrompt = e;
 });
-
-import { createClient }
-from 'https://esm.sh/@supabase/supabase-js'
-const supabaseUrl = "https://fdgtzilbwjiuetrheoly.supabase.co"
-const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkZ3R6aWxid2ppdWV0cmhlb2x5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NjczOTksImV4cCI6MjA5NDI0MzM5OX0.4SPYm4eypp7o143faPEkLAltsptS6iT1JHAitfhQEfY"
-
-const supabase = createClient(
-  supabaseUrl,
-  supabaseKey
-)
-
-const status = document.getElementById("status")
-
-document
-.getElementById("registerBtn")
-.addEventListener("click", register)
-
-document
-.getElementById("loginBtn")
-.addEventListener("click", login)
-
-document
-.getElementById("logoutBtn")
-.addEventListener("click", logout)
-
-async function register(){
-
-  const email =
-    document.getElementById("email").value
-
-  const password =
-    document.getElementById("password").value
-
-  const { data, error } =
-    await supabase.auth.signUp({
-      email,
-      password
-    })
-
-  if(error){
-    status.innerText = error.message
-    return
-  }
-
-  status.innerText =
-    "Registrierung erfolgreich!"
-}
-
-async function login(){
-
-  const email =
-    document.getElementById("email").value
-
-  const password =
-    document.getElementById("password").value
-
-  const { data, error } =
-    await supabase.auth.signInWithPassword({
-      email,
-      password
-    })
-  }

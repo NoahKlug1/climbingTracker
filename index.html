@@ -6,23 +6,69 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="CrimpLog">
-<meta name="theme-color" content="#1a1208">
+<meta name="theme-color" content="#000000">
 <title>CrimpLog</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="style.css">
-<script src="script.js" type="module"></script>
 </head>
 <body>
+
+<!-- AUTH SCREEN -->
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">CRIMP<span>LOG</span></div>
+    <div class="auth-sub">CLIMB · TRAIN · CONQUER</div>
+
+    <div id="authTabs" class="auth-tabs">
+      <button class="auth-tab active" onclick="showAuthMode('login')">Anmelden</button>
+      <button class="auth-tab" onclick="showAuthMode('register')">Registrieren</button>
+    </div>
+
+    <div id="authError" class="auth-error" style="display:none;"></div>
+
+    <div class="input-group">
+      <label class="input-label">E-Mail</label>
+      <input type="email" class="input-field" id="authEmail" placeholder="deine@email.com" autocomplete="email">
+    </div>
+    <div class="input-group">
+      <label class="input-label">Passwort</label>
+      <input type="password" class="input-field" id="authPassword" placeholder="Passwort" autocomplete="current-password">
+    </div>
+
+    <button class="btn btn-primary" id="authBtn" onclick="handleAuth()">ANMELDEN</button>
+
+    <div class="auth-divider"><span>oder</span></div>
+
+    <button class="btn btn-oauth" onclick="handleGoogleAuth()">
+      <svg width="18" height="18" viewBox="0 0 18 18" style="flex-shrink:0"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
+      Mit Google anmelden
+    </button>
+
+    <div id="authLoading" class="auth-loading" style="display:none;">
+      <div class="auth-spinner"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP (hidden until logged in) -->
+<div id="appScreen" style="display:none;">
 
 <!-- HEADER -->
 <header class="app-header">
   <div>
-    <div class="app-logo">CRIMP<span>LOG</span></div>
+    <div class="app-logo">CRIMP<span>LOG</span><span class="sync-dot" id="syncDot"></span></div>
     <span class="logo-sub">CLIMB · TRAIN · CONQUER</span>
   </div>
-  <div style="font-size:1.6rem; opacity:0.7">🧗</div>
+  <button class="user-btn" onclick="showUserMenu()" id="userBtn">👤</button>
 </header>
+
+<!-- USER MENU -->
+<div id="userMenu" class="user-menu" style="display:none;">
+  <div class="user-menu-email" id="userMenuEmail"></div>
+  <button class="user-menu-item" onclick="handleLogout()">🚪 Abmelden</button>
+</div>
+<div id="userMenuOverlay" onclick="hideUserMenu()" style="display:none;position:fixed;inset:0;z-index:149;"></div>
 
 <!-- NAV -->
 <nav class="nav-tabs" id="navTabs">
@@ -45,28 +91,10 @@
 
 <!-- === VIEW: LOG === -->
 <div class="view active" id="view-log">
-  <div class="box">
-
-    <h2>Login</h2>
-
-    <input type="email" id="email" placeholder="Email">
-    <input type="password" id="password" placeholder="Passwort">
-
-    <button onclick="register()">Registrieren</button>
-    <button onclick="login()">Login</button>
-    <button onclick="logout()">Logout</button>
-
-    <div id="status"></div>
-
-  </div>
   <div class="date-display" id="currentDateDisplay" style="position:relative;cursor:pointer;"></div>
   <div class="section-title">WORKOUT LOG</div>
   <div class="section-sub">Wähle eine Übung und erfasse deine Sets</div>
-
-  <!-- Exercise Selection -->
   <div id="exerciseList"></div>
-
-  <!-- Log Form (shown after selection) -->
   <div id="logForm" style="display:none;">
     <div class="divider"></div>
     <div class="card" id="logFormCard">
@@ -75,30 +103,20 @@
         <span class="pr-flash" id="prFlash" style="display:none">🏆 NEUER RECORD!</span>
       </div>
       <div class="card-title" id="logFormTitle">ÜBUNG</div>
-
-      <!-- Dynamic inputs -->
       <div id="dynamicInputs"></div>
-
-      <!-- Sets list -->
       <div id="setsContainer" style="display:none;">
-        <div style="font-size:0.7rem; font-weight:600; letter-spacing:2px; color:var(--chalk2); margin-bottom:6px;">DEINE SETS:</div>
+        <div style="font-size:0.65rem; font-weight:600; letter-spacing:1px; color:var(--t2); margin-bottom:6px; text-transform:uppercase;">Deine Sets:</div>
         <table class="sets-table">
           <thead><tr id="setsTableHeader"></tr></thead>
           <tbody id="setsTableBody"></tbody>
         </table>
       </div>
-
       <div style="display:flex; gap:8px; margin-top:12px;">
-        <button class="btn btn-secondary btn-sm" id="addSetBtn" onclick="addSet()">+ SET HINZUFÜGEN</button>
+        <button class="btn btn-secondary btn-sm" id="addSetBtn" onclick="addSet()">+ Set hinzufügen</button>
       </div>
     </div>
-
-    <button class="btn btn-primary" onclick="saveWorkout()" style="margin-top:8px;">
-      ✔ WORKOUT SPEICHERN
-    </button>
-    <button class="btn btn-secondary" onclick="cancelLog()" style="margin-top:8px;">
-      ABBRECHEN
-    </button>
+    <button class="btn btn-primary" onclick="saveWorkout()" style="margin-top:8px;">✔ Workout speichern</button>
+    <button class="btn btn-secondary" onclick="cancelLog()" style="margin-top:8px;">Abbrechen</button>
   </div>
 </div>
 
@@ -106,13 +124,11 @@
 <div class="view" id="view-history">
   <div class="section-title">TRAINING HISTORY</div>
   <div class="section-sub">Deine vergangenen Workouts</div>
-
   <div class="toggle-group">
     <button class="toggle-btn active" onclick="filterHistory('all', this)">ALLE</button>
     <button class="toggle-btn" onclick="filterHistory('week', this)">WOCHE</button>
     <button class="toggle-btn" onclick="filterHistory('month', this)">MONAT</button>
   </div>
-
   <div id="historyList"></div>
 </div>
 
@@ -120,12 +136,10 @@
 <div class="view" id="view-stats">
   <div class="section-title">STATISTIKEN</div>
   <div class="section-sub">Dein Fortschritt auf einen Blick</div>
-
   <div class="toggle-group">
     <button class="toggle-btn active" onclick="selectStatsExercise(this)">ALLE</button>
   </div>
   <div id="statsExerciseTabs" style="margin-bottom:12px;"></div>
-
   <div id="statsContent"></div>
 </div>
 
@@ -133,12 +147,9 @@
 <div class="view" id="view-sleep">
   <div class="section-title">SCHLAF DATEN</div>
   <div class="section-sub">Tracke deinen Schlaf für bessere Performance</div>
-
   <div class="sleep-import-info">
-    <strong>📱 Health App Integration:</strong> Da Browser keinen direkten Zugriff auf Apple Health haben, kannst du deine Schlafdaten hier manuell eingeben oder als CSV aus der Health App exportieren und importieren.
+    <strong>📱 Health App Integration:</strong> Da Browser keinen direkten Zugriff auf Apple Health haben, kannst du deine Schlafdaten hier manuell eingeben oder als CSV importieren.
   </div>
-
-  <!-- Manual Sleep Entry -->
   <div class="card">
     <div class="card-title">SCHLAF ERFASSEN</div>
     <div class="input-row">
@@ -177,30 +188,28 @@
     </div>
     <button class="btn btn-primary" onclick="saveSleepEntry()">SCHLAF SPEICHERN</button>
   </div>
-
-  <!-- CSV Import -->
   <div class="card">
     <div class="card-title">CSV IMPORT</div>
-    <p style="font-family:var(--font-s); font-size:0.75rem; color:var(--chalk2); margin-bottom:10px; line-height:1.5;">
-      Exportiere Schlaf aus Apple Health (Gesundheit → Daten exportieren) und lade die CSV hier hoch. Format: <em>date,hours,quality</em>
-    </p>
+    <p style="font-size:0.75rem; color:var(--t2); margin-bottom:10px; line-height:1.5;">Format: <em>date,hours,quality</em></p>
     <input type="file" id="csvImport" accept=".csv" style="display:none" onchange="importSleepCSV(event)">
     <button class="btn btn-secondary" onclick="document.getElementById('csvImport').click()">📎 CSV IMPORTIEREN</button>
   </div>
-
-  <!-- Sleep Stats -->
   <div id="sleepStats"></div>
 </div>
 
 <!-- === VIEW: COACH === -->
 <div class="view" id="view-coach">
   <div class="section-title">COACH</div>
-  <div class="section-sub">KI-Analyse: Training & Schlaf</div>
-
+  <div class="section-sub">Analyse: Training & Schlaf</div>
   <div id="coachContent"></div>
 </div>
 
+</div><!-- end appScreen -->
+
 <!-- TOAST -->
 <div class="toast" id="toast" style="display:none;"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="script.js"></script>
 </body>
 </html>
