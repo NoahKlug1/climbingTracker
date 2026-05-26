@@ -1,5 +1,5 @@
 # This file intentionally disables the Supabase preview integration.
 # CrimpLog uses Supabase as a backend-as-a-service, not as a hosted project.
-name: placeholder
-on: []
-jobs: {}
+#name: placeholder
+#on: []
+#jobs: {}
