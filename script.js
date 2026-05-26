@@ -9,17 +9,15 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 let currentUser = null;
 
 // ============================================================
-// AUTH FUNCTIONS
+// AUTH
 // ============================================================
 function showAuthMode(mode) {
   document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
   event.target.classList.add('active');
   const btn = document.getElementById('authBtn');
   btn.textContent = mode === 'login' ? 'ANMELDEN' : 'REGISTRIEREN';
-  btn.onclick = mode === 'login' ? handleAuth : handleAuth;
-  document.getElementById('authError').style.display = 'none';
-  // Store mode
   btn.dataset.mode = mode;
+  document.getElementById('authError').style.display = 'none';
 }
 
 function showAuthLoading(show) {
@@ -37,13 +35,10 @@ async function handleAuth() {
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value;
   const mode = document.getElementById('authBtn').dataset.mode || 'login';
-
   if (!email || !password) { showAuthError('Bitte E-Mail und Passwort eingeben.'); return; }
   if (password.length < 6) { showAuthError('Passwort muss mindestens 6 Zeichen haben.'); return; }
-
   showAuthLoading(true);
   document.getElementById('authError').style.display = 'none';
-
   let result;
   if (mode === 'register') {
     result = await db.auth.signUp({ email, password });
@@ -55,7 +50,6 @@ async function handleAuth() {
   } else {
     result = await db.auth.signInWithPassword({ email, password });
   }
-
   if (result.error) {
     showAuthLoading(false);
     const msgs = {
@@ -65,21 +59,16 @@ async function handleAuth() {
     };
     showAuthError(msgs[result.error.message] || result.error.message);
   }
-  // If success: onAuthStateChange fires automatically
 }
 
 async function handleGoogleAuth() {
-  const { error } = await db.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.href }
-  });
+  const { error } = await db.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.href } });
   if (error) showAuthError('Google Login fehlgeschlagen: ' + error.message);
 }
 
 async function handleLogout() {
   hideUserMenu();
   await db.auth.signOut();
-  // onAuthStateChange SIGNED_OUT handles the rest
 }
 
 function showUserMenu() {
@@ -92,22 +81,21 @@ function hideUserMenu() {
 }
 
 // ============================================================
-// DATABASE FUNCTIONS
+// DATABASE
 // ============================================================
 let isLoadingFromDB = false;
 
 async function loadFromDB(force = false) {
   if (!currentUser) return;
-  if (isLoadingFromDB) return; // prevent concurrent loads
+  if (isLoadingFromDB) return;
   isLoadingFromDB = true;
   setSyncing(true);
-
   try {
-    const [wRes, sRes] = await Promise.all([
+    const [wRes, sRes, rRes] = await Promise.all([
       db.from('workouts').select('*').eq('user_id', currentUser.id).order('workout_date', { ascending: false }),
-      db.from('sleep_entries').select('*').eq('user_id', currentUser.id).order('sleep_date', { ascending: false })
+      db.from('sleep_entries').select('*').eq('user_id', currentUser.id).order('sleep_date', { ascending: false }),
+      db.from('routes').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: false })
     ]);
-
     if (wRes.error) throw wRes.error;
     if (sRes.error) throw sRes.error;
 
@@ -132,11 +120,20 @@ async function loadFromDB(force = false) {
       notes: row.notes || ''
     }));
 
+    // routes may not have table yet – fallback gracefully
+    if (!rRes.error && rRes.data) {
+      routeEntries = rRes.data.map(row => ({
+        id: row.id,
+        grade: row.grade,
+        flash: row.flash || false,
+        date: row.created_at
+      }));
+    }
+
     renderAll();
   } catch (err) {
-    // Offline: keep whatever data we already have in memory
     if (workouts.length === 0 && sleepData.length === 0) {
-      showToast('\u26a0\ufe0f Offline \u2013 keine Daten verf\u00fcgbar');
+      showToast('⚠️ Offline – keine Daten verfügbar');
     }
     renderAll();
   } finally {
@@ -186,146 +183,75 @@ async function saveSleepToDB(entry) {
   return { ...entry, id: data.id };
 }
 
+async function saveRouteToDB(entry) {
+  if (!currentUser) return entry;
+  setSyncing(true);
+  try {
+    const { data, error } = await db.from('routes').insert({
+      user_id: currentUser.id,
+      grade: entry.grade,
+      flash: entry.flash
+    }).select().single();
+    setSyncing(false);
+    if (error) throw error;
+    return { ...entry, id: data.id, date: data.created_at };
+  } catch(e) {
+    setSyncing(false);
+    // table might not exist yet, that's ok
+    return entry;
+  }
+}
+
 function setSyncing(active) {
   const dot = document.getElementById('syncDot');
   if (dot) dot.className = 'sync-dot' + (active ? ' syncing' : '');
 }
 
 function renderAll() {
-  renderExerciseList();
-  renderHistory();
-  renderStats();
-  renderSleepStats();
-  renderCoach();
+  renderSleepView();
+  renderExerciseView('pullups', 'klimmzuege');
+  renderExerciseView('hangboard', 'fingerboard');
+  renderExerciseView('deadhang', 'deadhang');
+  renderExerciseView('lsit', 'lsit');
+  renderRouteWall();
+  renderCoaches();
 }
 
 // ============================================================
 // DATA & STATE
 // ============================================================
-const EXERCISES = [
-  {
-    id: 'pullups',
-    name: 'KLIMMZÜGE',
-    icon: '🧗',
-    desc: 'Körpergewicht, klassisch',
-    tags: ['reps', 'sets'],
-    animClass: 'anim-pullup',
+const EXERCISES = {
+  pullups: {
+    id: 'pullups', name: 'KLIMMZÜGE', icon: '🧗',
     fields: [
       { id: 'reps', label: 'Wiederholungen', type: 'stepper', min: 1, max: 50, step: 1, default: 8, unit: 'reps' },
-      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 20, step: 1, default: 3, unit: 'sets' }
+      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 20, step: 1, default: 3, unit: 'sets' },
+      { id: 'weight', label: 'Zusatzgewicht (kg)', type: 'stepper', min: 0, max: 9999, step: 2.5, default: 0, unit: 'kg' }
     ]
   },
-  {
-    id: 'pullups_weight',
-    name: 'KLIMMZÜGE + GEWICHT',
-    icon: '⚖️',
-    desc: 'Mit Zusatzgewicht',
-    tags: ['reps', 'sets', 'weight'],
-    animClass: 'anim-weight',
-    fields: [
-      { id: 'weight', label: 'Zusatzgewicht (kg)', type: 'stepper', min: 0, max: 9999, step: 2.5, default: 10, unit: 'kg' },
-      { id: 'reps', label: 'Wiederholungen', type: 'stepper', min: 1, max: 30, step: 1, default: 5, unit: 'reps' },
-      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 15, step: 1, default: 4, unit: 'sets' }
-    ]
-  },
-  {
-    id: 'hangboard',
-    name: 'HANGBOARD HÄNGEN',
-    icon: '🪨',
-    desc: 'Fingerboard, maximale Kraft',
-    tags: ['time', 'sets'],
-    animClass: 'anim-hang',
+  hangboard: {
+    id: 'hangboard', name: 'FINGERBOARD', icon: '🪨',
     fields: [
       { id: 'duration', label: 'Haltedauer (Sek.)', type: 'stepper', min: 5, max: 120, step: 5, default: 10, unit: 'sek' },
       { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 20, step: 1, default: 6, unit: 'sets' },
-      { id: 'rest', label: 'Pause (Sek.)', type: 'stepper', min: 30, max: 300, step: 10, default: 60, unit: 'sek' }
+      { id: 'weight', label: 'Zusatzgewicht (kg)', type: 'stepper', min: 0, max: 9999, step: 2.5, default: 0, unit: 'kg' }
     ]
   },
-  {
-    id: 'hangboard_weight',
-    name: 'HANGBOARD + GEWICHT',
-    icon: '🏋️',
-    desc: 'Mit Zusatzgewicht hängen',
-    tags: ['time', 'weight'],
-    animClass: 'anim-weight',
-    fields: [
-      { id: 'weight', label: 'Zusatzgewicht (kg)', type: 'stepper', min: 0, max: 9999, step: 2.5, default: 5, unit: 'kg' },
-      { id: 'duration', label: 'Haltedauer (Sek.)', type: 'stepper', min: 5, max: 60, step: 5, default: 7, unit: 'sek' },
-      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 15, step: 1, default: 5, unit: 'sets' }
-    ]
-  },
-  {
-    id: 'deadhang',
-    name: 'DEAD HANG',
-    icon: '⏱️',
-    desc: 'Maximale Haltedauer',
-    tags: ['time'],
-    animClass: 'anim-hang',
+  deadhang: {
+    id: 'deadhang', name: 'DEAD HANG', icon: '⏱️',
     fields: [
       { id: 'duration', label: 'Dauer (Sek.)', type: 'stepper', min: 5, max: 300, step: 5, default: 30, unit: 'sek' }
     ]
   },
-  {
-    id: 'one_arm_hang',
-    name: 'EINARMIGER HANG',
-    icon: '💪',
-    desc: 'Einarmiges Hängen',
-    tags: ['time', 'sets'],
-    animClass: 'anim-hang',
+  lsit: {
+    id: 'lsit', name: 'L-SIT', icon: '💪',
     fields: [
-      { id: 'arm', label: 'Arm', type: 'select', options: ['Links', 'Rechts', 'Beide'], default: 0 },
-      { id: 'duration', label: 'Dauer (Sek.)', type: 'stepper', min: 1, max: 60, step: 1, default: 5, unit: 'sek' },
+      { id: 'duration', label: 'Dauer (Sek.)', type: 'stepper', min: 1, max: 120, step: 1, default: 10, unit: 'sek' },
       { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 10, step: 1, default: 3, unit: 'sets' }
-    ]
-  },
-  {
-    id: 'muscle_up',
-    name: 'MUSCLE UP',
-    icon: '🔥',
-    desc: 'Kombibewegung',
-    tags: ['reps', 'sets'],
-    animClass: 'anim-pullup',
-    fields: [
-      { id: 'reps', label: 'Wiederholungen', type: 'stepper', min: 1, max: 20, step: 1, default: 3, unit: 'reps' },
-      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 10, step: 1, default: 3, unit: 'sets' }
-    ]
-  },
-  {
-    id: 'board_climb',
-    name: 'KLETTERBRETT',
-    icon: '🏔️',
-    desc: 'Systemboard / Moon Board',
-    tags: ['reps', 'sets'],
-    animClass: 'anim-pullup',
-    fields: [
-      { id: 'grade', label: 'Schwierigkeitsgrad', type: 'select', options: ['V0-V1','V2-V3','V4-V5','V6-V7','V8-V9','V10+'], default: 2 },
-      { id: 'problems', label: 'Routen', type: 'stepper', min: 1, max: 50, step: 1, default: 5, unit: 'ruten' },
-      { id: 'attempts', label: 'Versuche/Route', type: 'stepper', min: 1, max: 20, step: 1, default: 3, unit: 'versuche' }
-    ]
-  },
-  {
-    id: 'custom',
-    name: 'EIGENE ÜBUNG',
-    icon: '✏️',
-    desc: 'Benutzerdefiniert',
-    tags: ['reps', 'time', 'weight'],
-    animClass: 'anim-static',
-    fields: [
-      { id: 'customName', label: 'Name der Übung', type: 'text', placeholder: 'z.B. Ring Pushups', default: '' },
-      { id: 'reps', label: 'Wiederholungen', type: 'stepper', min: 0, max: 100, step: 1, default: 10, unit: 'reps' },
-      { id: 'duration', label: 'Dauer (Sek.)', type: 'stepper', min: 0, max: 300, step: 5, default: 0, unit: 'sek' },
-      { id: 'weight', label: 'Gewicht (kg)', type: 'stepper', min: 0, max: 9999, step: 2.5, default: 0, unit: 'kg' }
     ]
   }
-];
+};
 
-// State
-let selectedExercise = null;
-let currentSets = [];
-let stepperValues = {};
-let selectValues = {};
-
-// Load data
 function loadData(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
 }
@@ -335,21 +261,24 @@ function saveData(key, data) {
 
 let workouts = loadData('cl_workouts', []);
 let sleepData = loadData('cl_sleep', []);
-let workoutDate = new Date().toISOString().split('T')[0]; // selected workout date, default today
+let routeEntries = loadData('cl_routes', []);
+
+// Modal state
+let modalExerciseId = null;
+let modalSets = [];
+let modalStepperVals = {};
 
 // ============================================================
 // INIT
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-  // Init nav ONCE on load, not inside auth callback
   initNav();
+  document.getElementById('sleepDate').value = new Date().toISOString().split('T')[0];
 
-  // Auth state listener
   db.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_OUT' || !session?.user) {
       currentUser = null;
-      workouts = [];
-      sleepData = [];
+      workouts = []; sleepData = []; routeEntries = [];
       isLoadingFromDB = false;
       document.getElementById('appScreen').style.display = 'none';
       document.getElementById('authScreen').style.display = 'flex';
@@ -357,36 +286,22 @@ document.addEventListener('DOMContentLoaded', () => {
       setSyncing(false);
       return;
     }
-
-    // Only run full init on actual sign-in or initial session, not on token refresh
     const isNewLogin = event === 'SIGNED_IN' || event === 'INITIAL_SESSION';
     const userChanged = currentUser?.id !== session.user.id;
-
     if (isNewLogin || userChanged) {
       currentUser = session.user;
       document.getElementById('authScreen').style.display = 'none';
       document.getElementById('appScreen').style.display = 'block';
       document.getElementById('userMenuEmail').textContent = currentUser.email || 'Eingeloggt';
-
-      renderWorkoutDateDisplay();
-      document.getElementById('sleepDate').value = workoutDate;
-
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
-      }
-
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
       await loadFromDB();
     } else {
-      // Token refresh etc. \u2013 just update user reference silently
       currentUser = session.user;
     }
   });
 
-  // Reload fresh data when user comes back to the tab/app
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && currentUser) {
-      loadFromDB();
-    }
+    if (document.visibilityState === 'visible' && currentUser) loadFromDB();
   });
 });
 
@@ -398,570 +313,12 @@ function initNav() {
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('view-' + view).classList.add('active');
-      if (view === 'stats') renderStats();
-      if (view === 'sleep') renderSleepStats();
-      if (view === 'coach') renderCoach();
-      if (view === 'history') renderHistory();
     });
   });
 }
 
 // ============================================================
-// EXERCISE LIST
-// ============================================================
-function renderExerciseList() {
-  const container = document.getElementById('exerciseList');
-  container.innerHTML = EXERCISES.map(ex => `
-    <div class="exercise-card ${selectedExercise?.id === ex.id ? 'selected' : ''}"
-         onclick="selectExercise('${ex.id}')">
-      <div class="exercise-icon">${ex.icon}</div>
-      <div class="exercise-info">
-        <div class="exercise-name">${ex.name}</div>
-        <div class="exercise-desc">${ex.desc}</div>
-        <div class="exercise-tags">
-          ${ex.tags.map(t => `<span class="tag tag-${t}">${t.toUpperCase()}</span>`).join('')}
-        </div>
-      </div>
-    </div>
-  `).join('');
-}
-
-function selectExercise(id) {
-  selectedExercise = EXERCISES.find(e => e.id === id);
-  currentSets = [];
-  stepperValues = {};
-  selectValues = {};
-
-  // Reset defaults
-  selectedExercise.fields.forEach(f => {
-    if (f.type === 'stepper') stepperValues[f.id] = f.default;
-    if (f.type === 'select') selectValues[f.id] = f.default;
-  });
-
-  renderExerciseList();
-  showLogForm();
-}
-
-function showLogForm() {
-  const form = document.getElementById('logForm');
-  form.style.display = 'block';
-  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-  document.getElementById('logFormTitle').textContent = selectedExercise.name;
-
-  // Animation
-  const fig = document.getElementById('animFigure');
-  fig.textContent = selectedExercise.icon;
-  fig.className = 'anim-figure ' + selectedExercise.animClass;
-
-  // Check PR
-  checkAndShowPR();
-
-  renderDynamicInputs();
-  renderSetsTable();
-}
-
-function cancelLog() {
-  selectedExercise = null;
-  currentSets = [];
-  document.getElementById('logForm').style.display = 'none';
-  renderExerciseList();
-}
-
-// ============================================================
-// DYNAMIC INPUTS
-// ============================================================
-function renderDynamicInputs() {
-  const container = document.getElementById('dynamicInputs');
-  if (!selectedExercise) return;
-
-  container.innerHTML = selectedExercise.fields.map(f => {
-    if (f.type === 'stepper') {
-      const val = stepperValues[f.id];
-      const isWeight = f.id === 'weight';
-      const valDisplay = isWeight
-        ? `<span class="stepper-val stepper-val-editable" id="sv_${f.id}" onclick="openWeightInput('${f.id}')" title="Antippen zum Eingeben">${formatStepperVal(val, f)}</span>`
-        : `<span class="stepper-val" id="sv_${f.id}">${formatStepperVal(val, f)}</span>`;
-      return `
-        <div class="input-group">
-          <label class="input-label">${f.label}${isWeight ? ' <span style="font-size:0.65rem;opacity:0.6;font-weight:400;">(✎ antippen)</span>' : ''}</label>
-          <div class="stepper">
-            <button class="stepper-btn" onclick="stepChange('${f.id}', -${f.step})">−</button>
-            ${valDisplay}
-            <span class="stepper-unit">${f.unit}</span>
-            <button class="stepper-btn" onclick="stepChange('${f.id}', ${f.step})">+</button>
-          </div>
-        </div>`;
-    }
-    if (f.type === 'select') {
-      return `
-        <div class="input-group">
-          <label class="input-label">${f.label}</label>
-          <select class="input-field" id="sel_${f.id}" onchange="selectValues['${f.id}']=this.selectedIndex">
-            ${f.options.map((o, i) => `<option value="${i}" ${i === (selectValues[f.id]||0) ? 'selected' : ''}>${o}</option>`).join('')}
-          </select>
-        </div>`;
-    }
-    if (f.type === 'text') {
-      return `
-        <div class="input-group">
-          <label class="input-label">${f.label}</label>
-          <input type="text" class="input-field" id="txt_${f.id}" placeholder="${f.placeholder||''}" value="${f.default||''}">
-        </div>`;
-    }
-    return '';
-  }).join('');
-}
-
-function formatStepperVal(val, field) {
-  if (field.step < 1) return val.toFixed(1);
-  return val;
-}
-
-function stepChange(fieldId, delta) {
-  const field = selectedExercise.fields.find(f => f.id === fieldId);
-  let val = stepperValues[fieldId] + delta;
-  val = Math.min(field.max, Math.max(field.min, val));
-  // Round to step
-  val = Math.round(val / field.step) * field.step;
-  if (field.step < 1) val = parseFloat(val.toFixed(1));
-  stepperValues[fieldId] = val;
-
-  const el = document.getElementById('sv_' + fieldId);
-  if (el) {
-    el.textContent = formatStepperVal(val, field);
-    el.style.animation = 'none';
-    requestAnimationFrame(() => { el.style.animation = 'popInSimple 0.2s ease'; });
-  }
-
-  // Animate weight PR check
-  if (fieldId === 'weight') {
-    const fig = document.getElementById('animFigure');
-    fig.style.animation = 'none';
-    requestAnimationFrame(() => { fig.style.animation = 'weightPulse 0.5s ease'; });
-    checkAndShowPR();
-  }
-}
-
-// Direct weight input via prompt
-function openWeightInput(fieldId) {
-  const field = selectedExercise.fields.find(f => f.id === fieldId);
-  const current = stepperValues[fieldId];
-  const input = prompt(`Gewicht direkt eingeben (kg):`, current);
-  if (input === null) return;
-  let val = parseFloat(input.replace(',', '.'));
-  if (isNaN(val) || val < 0) { showToast('Ungültiger Wert!'); return; }
-  val = Math.round(val * 10) / 10; // round to 1 decimal
-  stepperValues[fieldId] = val;
-  const el = document.getElementById('sv_' + fieldId);
-  if (el) {
-    el.textContent = val % 1 === 0 ? val : val.toFixed(1);
-    el.style.animation = 'none';
-    requestAnimationFrame(() => { el.style.animation = 'popInSimple 0.2s ease'; });
-  }
-  if (fieldId === 'weight') checkAndShowPR();
-}
-
-// Workout date display & picker
-function renderWorkoutDateDisplay() {
-  const container = document.getElementById('currentDateDisplay');
-  const d = new Date(workoutDate + 'T12:00:00');
-  const label = d.toLocaleDateString('de-AT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  const today = new Date().toISOString().split('T')[0];
-  const isToday = workoutDate === today;
-  container.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:relative;">
-      <label style="cursor:pointer;display:flex;align-items:center;gap:6px;position:relative;">
-        <span class="date-label-text">📅 ${isToday ? 'Heute – ' : ''}${label} <span style="font-size:0.65rem;opacity:0.5;">▼</span></span>
-        <input type="date" value="${workoutDate}" max="${today}"
-          style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px;"
-          onchange="setWorkoutDate(this.value)">
-      </label>
-      ${!isToday ? `<button onclick="setWorkoutDate('${today}')" class="today-btn">HEUTE</button>` : ''}
-    </div>`;
-}
-
-function setWorkoutDate(val) {
-  workoutDate = val;
-  renderWorkoutDateDisplay();
-}
-
-function getFieldValue(field) {
-  if (field.type === 'stepper') return stepperValues[field.id];
-  if (field.type === 'select') {
-    const idx = selectValues[field.id] || 0;
-    return field.options[idx];
-  }
-  if (field.type === 'text') {
-    const el = document.getElementById('txt_' + field.id);
-    return el ? el.value : '';
-  }
-  return '';
-}
-
-// ============================================================
-// SETS
-// ============================================================
-function addSet() {
-  if (!selectedExercise) return;
-
-  const set = { id: Date.now() };
-  selectedExercise.fields.forEach(f => {
-    set[f.id] = getFieldValue(f);
-  });
-  currentSets.push(set);
-  renderSetsTable();
-
-  // Animate add
-  const rows = document.querySelectorAll('#setsTableBody tr');
-  const last = rows[rows.length - 1];
-  if (last) { last.style.animation = 'none'; requestAnimationFrame(() => last.style.animation = 'popInSimple 0.3s ease'); }
-
-  showToast(`Set ${currentSets.length} gespeichert!`);
-  checkAndShowPR();
-}
-
-function deleteSet(idx) {
-  currentSets.splice(idx, 1);
-  renderSetsTable();
-}
-
-function renderSetsTable() {
-  const container = document.getElementById('setsContainer');
-  const tbody = document.getElementById('setsTableBody');
-  const thead = document.getElementById('setsTableHeader');
-
-  if (currentSets.length === 0) {
-    container.style.display = 'none';
-    return;
-  }
-  container.style.display = 'block';
-
-  // Header
-  const headers = ['#', ...selectedExercise.fields.map(f => f.label.split(' ')[0]), ''];
-  thead.innerHTML = headers.map(h => `<th>${h}</th>`).join('');
-
-  // Rows
-  tbody.innerHTML = currentSets.map((set, i) => {
-    const cells = selectedExercise.fields.map(f => {
-      const v = set[f.id];
-      if (f.type === 'stepper' && f.unit) return `<td>${v}<small style="color:var(--chalk2);font-size:0.65rem"> ${f.unit}</small></td>`;
-      return `<td>${v}</td>`;
-    }).join('');
-    return `<tr><td style="color:var(--chalk2)">${i+1}</td>${cells}<td><button class="delete-set-btn" onclick="deleteSet(${i})">✕</button></td></tr>`;
-  }).join('');
-}
-
-// ============================================================
-// SAVE WORKOUT
-// ============================================================
-async function saveWorkout() {
-  if (!selectedExercise || currentSets.length === 0) {
-    showToast('Füge zuerst mindestens 1 Set hinzu!');
-    return;
-  }
-
-  let workout = {
-    id: Date.now(),
-    date: workoutDate + 'T12:00:00.000Z',
-    exerciseId: selectedExercise.id,
-    exerciseName: selectedExercise.name,
-    exerciseIcon: selectedExercise.icon,
-    sets: [...currentSets],
-    notes: ''
-  };
-
-  // Save to Supabase (get real UUID back)
-  workout = await saveWorkoutToDB(workout);
-  workouts.unshift(workout);
-
-  // Animation
-  const fig = document.getElementById('animFigure');
-  fig.style.animation = 'none';
-  requestAnimationFrame(() => { fig.style.animation = 'weightPulse 0.6s ease'; });
-
-  showToast('💪 WORKOUT GESPEICHERT!');
-  cancelLog();
-  renderHistory();
-}
-
-// ============================================================
-// HISTORY
-// ============================================================
-function renderHistory(filter = 'all') {
-  const container = document.getElementById('historyList');
-  let data = [...workouts];
-
-  if (filter === 'week') {
-    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7);
-    data = data.filter(w => new Date(w.date) >= cutoff);
-  } else if (filter === 'month') {
-    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 1);
-    data = data.filter(w => new Date(w.date) >= cutoff);
-  }
-
-  if (data.length === 0) {
-    container.innerHTML = `<div class="empty-state">
-      <span class="empty-state-icon">🧗</span>
-      <div class="empty-state-text">Noch keine Workouts – Zeit zu trainieren!</div>
-    </div>`;
-    return;
-  }
-
-  // Group by date
-  const grouped = {};
-  data.forEach(w => {
-    const d = new Date(w.date).toLocaleDateString('de-AT', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-    if (!grouped[d]) grouped[d] = [];
-    grouped[d].push(w);
-  });
-
-  container.innerHTML = Object.entries(grouped).map(([date, ws]) => `
-    <div style="margin-bottom:16px;">
-      <div style="font-size:0.72rem; font-weight:600; color:var(--t3); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">${date}</div>
-      ${ws.map(w => `
-        <div class="history-item">
-          <div style="font-size:1.5rem; width:42px; height:42px; background:var(--bg4); border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${w.exerciseIcon}</div>
-          <div style="flex:1; min-width:0;">
-            <div class="history-exercise">${w.exerciseName}</div>
-            <div class="history-detail">${summarizeSets(w)}</div>
-          </div>
-          <button onclick="deleteWorkout(${w.id})" style="background:none;border:none;color:var(--t3);font-size:1.1rem;padding:2px 6px;cursor:pointer;flex-shrink:0;">✕</button>
-        </div>
-      `).join('')}
-    </div>
-  `).join('');
-}
-
-function summarizeSets(workout) {
-  const ex = EXERCISES.find(e => e.id === workout.exerciseId);
-  if (!ex || workout.sets.length === 0) return `${workout.sets.length} Sets`;
-  const s = workout.sets;
-  const parts = [];
-  parts.push(`${s.length} Sets`);
-  if (s[0].reps !== undefined) {
-    const total = s.reduce((a, b) => a + (b.reps || 0), 0);
-    parts.push(`${total} Reps`);
-  }
-  if (s[0].weight !== undefined && s[0].weight > 0) {
-    const maxW = Math.max(...s.map(x => x.weight || 0));
-    parts.push(`Max ${maxW}kg`);
-  }
-  if (s[0].duration !== undefined) {
-    const total = s.reduce((a, b) => a + (b.duration || 0), 0);
-    parts.push(`${total}sek total`);
-  }
-  return parts.join(' · ');
-}
-
-async function deleteWorkout(id) {
-  await deleteWorkoutFromDB(id);
-  workouts = workouts.filter(w => w.id !== id);
-  renderHistory();
-  showToast('Workout gelöscht');
-}
-
-function filterHistory(type, btn) {
-  document.querySelectorAll('#view-history .toggle-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  renderHistory(type);
-}
-
-// ============================================================
-// STATS
-// ============================================================
-let currentStatsFilter = 'all';
-
-function renderStats() {
-  const tabsContainer = document.getElementById('statsExerciseTabs');
-  const exIds = [...new Set(workouts.map(w => w.exerciseId))];
-
-  tabsContainer.innerHTML = `<div class="toggle-group" style="flex-wrap:wrap;">` +
-    exIds.map(id => {
-      const ex = EXERCISES.find(e => e.id === id);
-      return `<button class="toggle-btn ${currentStatsFilter === id ? 'active' : ''}" onclick="setStatsFilter('${id}', this)">${ex?.exerciseIcon||''} ${ex?.name.split(' ')[0]||id}</button>`;
-    }).join('') + `</div>`;
-
-  renderStatsContent();
-}
-
-function setStatsFilter(id, btn) {
-  currentStatsFilter = id;
-  document.querySelectorAll('#statsExerciseTabs .toggle-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  renderStatsContent();
-}
-
-function selectStatsExercise(btn) {
-  currentStatsFilter = 'all';
-  document.querySelectorAll('#statsExerciseTabs .toggle-btn').forEach(b => b.classList.remove('active'));
-  renderStatsContent();
-}
-
-function renderStatsContent() {
-  const container = document.getElementById('statsContent');
-  let data = workouts;
-  if (currentStatsFilter !== 'all') {
-    data = workouts.filter(w => w.exerciseId === currentStatsFilter);
-  }
-
-  if (data.length === 0) {
-    container.innerHTML = `<div class="empty-state"><span class="empty-state-icon">📊</span><div class="empty-state-text">Noch keine Daten vorhanden</div></div>`;
-    return;
-  }
-
-  // Overall stats
-  const totalWorkouts = data.length;
-  const totalSets = data.reduce((a, w) => a + w.sets.length, 0);
-  const totalReps = data.reduce((a, w) => a + w.sets.reduce((b, s) => b + (s.reps || 0), 0), 0);
-  const weights = data.flatMap(w => w.sets.map(s => s.weight)).filter(w => w > 0);
-  const maxWeight = weights.length ? Math.max(...weights) : 0;
-
-  // Volume over last 14 days
-  const last14 = getLast14DaysVolume(data);
-
-  container.innerHTML = `
-    <div class="card">
-      <div class="card-title">ÜBERSICHT</div>
-      <div class="stat-row"><span class="stat-label">WORKOUTS GESAMT</span><span class="stat-value highlight">${totalWorkouts}</span></div>
-      <div class="stat-row"><span class="stat-label">SETS GESAMT</span><span class="stat-value">${totalSets}</span></div>
-      <div class="stat-row"><span class="stat-label">REPS GESAMT</span><span class="stat-value">${totalReps}</span></div>
-      ${maxWeight > 0 ? `<div class="stat-row"><span class="stat-label">MAX. GEWICHT</span><span class="stat-value gold">${maxWeight} kg 🏆</span></div>` : ''}
-    </div>
-
-    <div class="card">
-      <div class="card-title">VOLUMEN – LETZTE 14 TAGE</div>
-      <div class="chart-wrap">${renderBarChart(last14)}</div>
-    </div>
-
-    ${renderExercisePRs(data)}
-    ${renderWeightProgression(data)}
-  `;
-}
-
-function getLast14DaysVolume(data) {
-  const result = [];
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const ds = d.toISOString().split('T')[0];
-    const dayWorkouts = data.filter(w => w.date.split('T')[0] === ds);
-    const vol = dayWorkouts.reduce((a, w) => a + w.sets.reduce((b, s) => b + (s.reps || s.duration || 1), 0), 0);
-    result.push({ date: ds, label: d.toLocaleDateString('de-AT', { day: 'numeric', month: 'numeric' }), value: vol });
-  }
-  return result;
-}
-
-function renderBarChart(data) {
-  const max = Math.max(...data.map(d => d.value), 1);
-  const w = Math.max(320, window.innerWidth - 52);
-  const h = 100;
-  const barW = Math.floor((w - 20) / data.length) - 2;
-
-  const bars = data.map((d, i) => {
-    const barH = max > 0 ? Math.round((d.value / max) * 70) : 0;
-    const x = 10 + i * (barW + 2);
-    const y = h - 20 - barH;
-    const color = barH > 50 ? '#e85a1a' : barH > 20 ? '#d4a520' : '#3a2a1a';
-    return `
-      <rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${color}" opacity="0.85"/>
-      ${d.value > 0 ? `<text x="${x + barW/2}" y="${y - 3}" text-anchor="middle" fill="#b8a88a" font-size="8" font-family="Oswald">${d.value}</text>` : ''}
-      <text x="${x + barW/2}" y="${h - 4}" text-anchor="middle" fill="#6b5a42" font-size="7" font-family="Oswald">${d.label}</text>
-    `;
-  }).join('');
-
-  return `<svg class="chart-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-    <line x1="10" y1="${h-20}" x2="${w-10}" y2="${h-20}" stroke="#3a2a1a" stroke-width="1"/>
-    ${bars}
-  </svg>`;
-}
-
-function renderExercisePRs(data) {
-  // Find best performance per exercise
-  const prMap = {};
-  data.forEach(w => {
-    if (!prMap[w.exerciseId]) prMap[w.exerciseId] = { name: w.exerciseName, icon: w.exerciseIcon, maxReps: 0, maxWeight: 0, maxDuration: 0 };
-    w.sets.forEach(s => {
-      if (s.reps > prMap[w.exerciseId].maxReps) prMap[w.exerciseId].maxReps = s.reps;
-      if ((s.weight || 0) > prMap[w.exerciseId].maxWeight) prMap[w.exerciseId].maxWeight = s.weight;
-      if ((s.duration || 0) > prMap[w.exerciseId].maxDuration) prMap[w.exerciseId].maxDuration = s.duration;
-    });
-  });
-
-  const entries = Object.entries(prMap);
-  if (entries.length === 0) return '';
-
-  return `<div class="card">
-    <div class="card-title">🏆 PERSONAL RECORDS</div>
-    ${entries.map(([id, pr]) => `
-      <div class="stat-row">
-        <span class="stat-label">${pr.icon} ${pr.name}</span>
-        <span style="text-align:right; font-size:0.8rem; color:var(--gold2); font-family:var(--font-b); font-weight:600;">
-          ${pr.maxReps > 0 ? `${pr.maxReps} reps` : ''}
-          ${pr.maxWeight > 0 ? ` · ${pr.maxWeight}kg` : ''}
-          ${pr.maxDuration > 0 ? ` · ${pr.maxDuration}sek` : ''}
-        </span>
-      </div>
-    `).join('')}
-  </div>`;
-}
-
-function renderWeightProgression(data) {
-  const weightData = data.filter(w => w.sets.some(s => s.weight > 0));
-  if (weightData.length < 2) return '';
-
-  const points = weightData.map(w => ({
-    date: w.date,
-    maxWeight: Math.max(...w.sets.map(s => s.weight || 0))
-  })).sort((a, b) => new Date(a.date) - new Date(b.date));
-
-  const svgW = Math.max(300, window.innerWidth - 52);
-  const svgH = 80;
-  const maxW = Math.max(...points.map(p => p.maxWeight));
-  const n = points.length;
-
-  const coords = points.map((p, i) => {
-    const x = 10 + (i / Math.max(n - 1, 1)) * (svgW - 20);
-    const y = svgH - 20 - ((p.maxWeight / maxW) * 50);
-    return { x, y, w: p.maxWeight };
-  });
-
-  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x},${c.y}`).join(' ');
-  const dots = coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="3" fill="var(--rust2)"><title>${c.w}kg</title></circle>`).join('');
-
-  return `<div class="card">
-    <div class="card-title">GEWICHTS-VERLAUF</div>
-    <div class="chart-wrap">
-      <svg class="chart-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
-        <path d="${path}" fill="none" stroke="var(--rust)" stroke-width="2"/>
-        ${dots}
-        <text x="${coords[coords.length-1].x}" y="${coords[coords.length-1].y - 8}" text-anchor="middle" fill="var(--gold2)" font-size="9" font-family="Oswald">${coords[coords.length-1].w}kg</text>
-      </svg>
-    </div>
-  </div>`;
-}
-
-// ============================================================
-// PR CHECK
-// ============================================================
-function checkAndShowPR() {
-  if (!selectedExercise) return;
-  const prFlash = document.getElementById('prFlash');
-  prFlash.style.display = 'none';
-
-  const prev = workouts.filter(w => w.exerciseId === selectedExercise.id);
-  if (prev.length === 0) return;
-
-  const weight = stepperValues['weight'] || 0;
-  if (weight > 0) {
-    const prevMax = Math.max(...prev.flatMap(w => w.sets.map(s => s.weight || 0)));
-    if (weight > prevMax) {
-      prFlash.style.display = 'block';
-    }
-  }
-}
-
-// ============================================================
-// SLEEP
+// SLEEP VIEW
 // ============================================================
 async function saveSleepEntry() {
   const date = document.getElementById('sleepDate').value;
@@ -970,25 +327,19 @@ async function saveSleepEntry() {
   const quality = parseInt(document.getElementById('sleepQuality').value);
   const hrv = parseInt(document.getElementById('sleepHRV').value) || null;
   const notes = document.getElementById('sleepNotes').value;
-
   if (!date || !bedtime || !wakeup) { showToast('Bitte Datum & Zeiten eingeben!'); return; }
-
-  const bed = parseTime(bedtime);
-  const wake = parseTime(wakeup);
+  const bed = parseTime(bedtime), wake = parseTime(wakeup);
   let hours = (wake - bed) / 3600;
   if (hours < 0) hours += 24;
-
   let entry = { id: Date.now(), date, bedtime, wakeup, hours: Math.round(hours * 10) / 10, quality, hrv, notes };
-
-  // Save to Supabase
   entry = await saveSleepToDB(entry);
-
   sleepData = sleepData.filter(s => s.date !== date);
   sleepData.unshift(entry);
   sleepData.sort((a, b) => new Date(b.date) - new Date(a.date));
-
+  saveData('cl_sleep', sleepData);
   showToast('💤 Schlafdaten gespeichert!');
-  renderSleepStats();
+  renderSleepView();
+  renderCoaches();
   document.getElementById('sleepNotes').value = '';
   document.getElementById('sleepHRV').value = '';
 }
@@ -998,256 +349,478 @@ function parseTime(str) {
   return h * 3600 + m * 60;
 }
 
-function importSleepCSV(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const lines = e.target.result.split('\n').filter(l => l.trim());
-    let count = 0;
-    lines.forEach(line => {
-      const parts = line.split(',');
-      if (parts.length >= 2) {
-        const date = parts[0].trim();
-        const hours = parseFloat(parts[1].trim());
-        const quality = parseInt(parts[2]?.trim()) || 3;
-        if (date && !isNaN(hours)) {
-          sleepData = sleepData.filter(s => s.date !== date);
-          sleepData.push({ id: Date.now() + count, date, hours, quality, notes: 'Importiert' });
-          count++;
-        }
-      }
-    });
-    sleepData.sort((a, b) => new Date(b.date) - new Date(a.date));
-    saveData('cl_sleep', sleepData);
-    showToast(`${count} Einträge importiert!`);
-    renderSleepStats();
-  };
-  reader.readAsText(file);
+function renderSleepView() {
+  renderSleepScoreCard();
+  renderSleepStats();
+}
+
+function renderSleepScoreCard() {
+  const el = document.getElementById('sleepScoreCard');
+  if (sleepData.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  const recent = sleepData.slice(0, 7);
+  const avgHours = recent.reduce((a, b) => a + b.hours, 0) / recent.length;
+  const avgQuality = recent.reduce((a, b) => a + b.quality, 0) / recent.length;
+  const sleepScore = Math.round((avgHours / 8) * 50 + (avgQuality / 5) * 50);
+  const scoreColor = sleepScore >= 80 ? 'var(--green)' : sleepScore >= 60 ? 'var(--gold)' : sleepScore >= 40 ? 'var(--warn)' : 'var(--red)';
+  el.innerHTML = `
+    <div class="card sleep-score-big">
+      <div class="sleep-score-ring" style="--score-color:${scoreColor}">
+        <div class="sleep-score-number" style="color:${scoreColor}">${sleepScore}</div>
+        <div class="sleep-score-tag">SCHLAF-SCORE</div>
+        <div class="sleep-score-sub">Ø letzte 7 Nächte</div>
+      </div>
+      <div class="sleep-meta">
+        <div class="sleep-meta-item"><span class="sleep-meta-val">${avgHours.toFixed(1)}h</span><span class="sleep-meta-label">Ø Dauer</span></div>
+        <div class="sleep-meta-sep"></div>
+        <div class="sleep-meta-item"><span class="sleep-meta-val">${'★'.repeat(Math.round(avgQuality))}</span><span class="sleep-meta-label">Ø Qualität</span></div>
+      </div>
+    </div>`;
 }
 
 function renderSleepStats() {
   const container = document.getElementById('sleepStats');
   if (sleepData.length === 0) {
-    container.innerHTML = `<div class="empty-state"><span class="empty-state-icon">🌙</span><div class="empty-state-text">Noch keine Schlafdaten</div></div>`;
+    container.innerHTML = `<div class="empty-state"><span class="empty-state-icon">🌙</span><div class="empty-state-text">Noch keine Schlafdaten – füge deinen ersten Eintrag hinzu!</div></div>`;
     return;
   }
-
-  const recent = sleepData.slice(0, 7);
-  const avgHours = recent.reduce((a, b) => a + b.hours, 0) / recent.length;
-  const avgQuality = recent.reduce((a, b) => a + b.quality, 0) / recent.length;
-  const lastEntry = sleepData[0];
-  const sleepScore = Math.round((avgHours / 8) * 50 + (avgQuality / 5) * 50);
-  const scoreClass = sleepScore >= 80 ? 'great' : sleepScore >= 60 ? 'good' : sleepScore >= 40 ? 'warn' : 'bad';
-
-  const chartData = recent.map(s => ({ label: s.date.slice(5), value: s.hours })).reverse();
-
+  const recent = sleepData.slice(0, 7).reverse();
+  const chartData = recent.map(s => ({ label: s.date.slice(5), value: s.hours, quality: s.quality }));
   container.innerHTML = `
     <div class="card">
-      <div class="sleep-score">
-        <div class="sleep-score-val">${sleepScore}</div>
-        <div class="sleep-score-label">SCHLAF-SCORE (7-TAGE)</div>
-      </div>
-      <div class="stat-row"><span class="stat-label">Ø SCHLAFDAUER</span><span class="stat-value ${scoreClass === 'great' ? 'gold' : ''}">${avgHours.toFixed(1)}h</span></div>
-      <div class="stat-row"><span class="stat-label">Ø QUALITÄT</span><span class="stat-value">
-        ${'★'.repeat(Math.round(avgQuality))}${'☆'.repeat(5 - Math.round(avgQuality))}
-      </span></div>
-      ${lastEntry.hrv ? `<div class="stat-row"><span class="stat-label">LETZTER HRV</span><span class="stat-value">${lastEntry.hrv} ms</span></div>` : ''}
-    </div>
-
-    <div class="card">
-      <div class="card-title">SCHLAF – LETZTE 7 NÄCHTE</div>
+      <div class="card-title">LETZTE 7 NÄCHTE</div>
       <div class="chart-wrap">${renderSleepChart(chartData)}</div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">VERLAUF</div>
-      ${sleepData.slice(0, 10).map(s => `
-        <div class="stat-row">
-          <span style="font-family:var(--font-s); font-size:0.75rem; color:var(--chalk2)">${s.date}</span>
-          <span style="display:flex; align-items:center; gap:8px;">
-            <span style="font-family:var(--font-b); font-size:0.9rem; color:var(--chalk)">${s.hours}h</span>
-            <span style="font-size:0.75rem; color:var(--gold)">${'★'.repeat(s.quality)}</span>
-          </span>
-        </div>
-      `).join('')}
-    </div>
-  `;
+      <div class="sleep-list">
+        ${sleepData.slice(0, 10).map(s => `
+          <div class="stat-row">
+            <span style="font-size:0.75rem;color:var(--t2)">${s.date}</span>
+            <span style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:0.9rem;font-weight:700;color:var(--t1)">${s.hours}h</span>
+              <span style="font-size:0.75rem;color:var(--gold)">${'★'.repeat(s.quality)}</span>
+            </span>
+          </div>`).join('')}
+      </div>
+    </div>`;
 }
 
 function renderSleepChart(data) {
   const svgW = Math.max(300, window.innerWidth - 52);
-  const svgH = 90;
+  const svgH = 100;
   const max = Math.max(...data.map(d => d.value), 8);
-  const barW = Math.floor((svgW - 20) / data.length) - 2;
-
+  const barW = Math.floor((svgW - 20) / Math.max(data.length, 1)) - 2;
   const bars = data.map((d, i) => {
-    const barH = Math.round((d.value / max) * 65);
+    const barH = Math.round((d.value / max) * 70);
     const x = 10 + i * (barW + 2);
     const y = svgH - 20 - barH;
-    const color = d.value >= 7.5 ? '#d4a520' : d.value >= 6 ? '#2a5c3f' : '#c0440a';
-    return `
-      <rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${color}" opacity="0.85"/>
-      <text x="${x + barW/2}" y="${y - 3}" text-anchor="middle" fill="#b8a88a" font-size="8" font-family="Oswald">${d.value}h</text>
-      <text x="${x + barW/2}" y="${svgH - 4}" text-anchor="middle" fill="#6b5a42" font-size="7" font-family="Oswald">${d.label}</text>
-    `;
+    const color = d.value >= 7.5 ? '#FFD60A' : d.value >= 6 ? '#30D158' : '#FF6B35';
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${color}" opacity="0.85"/>
+      <text x="${x+barW/2}" y="${y-3}" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="8" font-family="Inter">${d.value}h</text>
+      <text x="${x+barW/2}" y="${svgH-4}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="7" font-family="Inter">${d.label}</text>`;
   }).join('');
-
-  // 8h reference line
-  const refY = svgH - 20 - Math.round((8 / max) * 65);
-  return `<svg class="chart-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
-    <line x1="10" y1="${refY}" x2="${svgW-10}" y2="${refY}" stroke="#d4a520" stroke-width="1" stroke-dasharray="4,3" opacity="0.4"/>
-    <text x="${svgW-12}" y="${refY-3}" text-anchor="end" fill="#d4a520" font-size="7" font-family="Oswald" opacity="0.6">8h ZIEL</text>
-    <line x1="10" y1="${svgH-20}" x2="${svgW-10}" y2="${svgH-20}" stroke="#3a2a1a" stroke-width="1"/>
-    ${bars}
-  </svg>`;
+  const refY = svgH - 20 - Math.round((8/max)*70);
+  return `<svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+    <line x1="10" y1="${refY}" x2="${svgW-10}" y2="${refY}" stroke="#FFD60A" stroke-width="1" stroke-dasharray="4,3" opacity="0.35"/>
+    <text x="${svgW-12}" y="${refY-3}" text-anchor="end" fill="#FFD60A" font-size="7" font-family="Inter" opacity="0.5">8h</text>
+    <line x1="10" y1="${svgH-20}" x2="${svgW-10}" y2="${svgH-20}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+    ${bars}</svg>`;
 }
 
 // ============================================================
-// COACH / AI ANALYSIS
+// EXERCISE VIEWS (Klimmzüge, Fingerboard, Deadhang, L-Sit)
 // ============================================================
-function renderCoach() {
-  const container = document.getElementById('coachContent');
-  const recommendations = generateRecommendations();
+function renderExerciseView(exId, viewKey) {
+  const data = workouts.filter(w => w.exerciseId === exId);
+  renderExercisePR(exId, viewKey, data);
+  renderExerciseChart(exId, viewKey, data);
+}
 
-  if (recommendations.length === 0) {
-    container.innerHTML = `<div class="empty-state">
-      <span class="empty-state-icon">⚡</span>
-      <div class="empty-state-text">Starte mit dem Training und dem Schlaf-Tracking – dann bekommst du hier personalisierte Empfehlungen!</div>
-    </div>`;
+function renderExercisePR(exId, viewKey, data) {
+  const el = document.getElementById(viewKey + '-pr');
+  if (!el) return;
+  if (data.length === 0) {
+    el.innerHTML = `<div class="pr-empty">Noch kein Eintrag – leg los! 🏆</div>`;
     return;
   }
-
-  container.innerHTML = recommendations.map(r => `
-    <div class="rec-card anim-slide">
-      <div class="rec-icon">${r.icon}</div>
-      <div class="rec-title">${r.title}</div>
-      <div class="rec-text">${r.text}</div>
-    </div>
-  `).join('');
+  const ex = EXERCISES[exId];
+  let prLines = [];
+  const allSets = data.flatMap(w => w.sets);
+  if (allSets.some(s => s.reps)) {
+    const maxReps = Math.max(...allSets.map(s => s.reps || 0));
+    prLines.push(`<span class="pr-val">${maxReps}</span><span class="pr-unit">reps</span>`);
+  }
+  if (allSets.some(s => s.duration)) {
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
+    prLines.push(`<span class="pr-val">${maxDur}</span><span class="pr-unit">sek</span>`);
+  }
+  if (allSets.some(s => s.weight > 0)) {
+    const maxW = Math.max(...allSets.map(s => s.weight || 0));
+    prLines.push(`<span class="pr-val">${maxW}</span><span class="pr-unit">kg</span>`);
+  }
+  el.innerHTML = `
+    <div class="card pr-card">
+      <div class="pr-label">🏆 BESTLEISTUNG</div>
+      <div class="pr-values">${prLines.join('<span class="pr-sep">·</span>')}</div>
+      <div class="pr-sub">${data.length} Workouts gesamt</div>
+    </div>`;
 }
 
-function generateRecommendations() {
-  const recs = [];
-  const now = new Date();
+function renderExerciseChart(exId, viewKey, data) {
+  const el = document.getElementById(viewKey + '-chart');
+  if (!el) return;
+  if (data.length < 2) {
+    el.innerHTML = `<div class="chart-empty">Mindestens 2 Einträge für den Verlauf needed</div>`;
+    return;
+  }
+  // Build time series of best metric per session
+  const points = data.slice().reverse().map(w => {
+    const s = w.sets;
+    let val = 0;
+    if (s.some(x => x.reps)) val = Math.max(...s.map(x => x.reps || 0));
+    else if (s.some(x => x.duration)) val = Math.max(...s.map(x => x.duration || 0));
+    else if (s.some(x => x.weight)) val = Math.max(...s.map(x => x.weight || 0));
+    return { date: w.date.split('T')[0].slice(5), val };
+  });
+  const svgW = Math.max(300, window.innerWidth - 52);
+  const svgH = 100;
+  const maxV = Math.max(...points.map(p => p.val), 1);
+  const n = points.length;
+  const coords = points.map((p, i) => ({
+    x: 14 + (i / Math.max(n-1,1)) * (svgW-28),
+    y: svgH-22 - (p.val/maxV)*65,
+    val: p.val, date: p.date
+  }));
+  const path = coords.map((c,i) => `${i===0?'M':'L'}${c.x},${c.y}`).join(' ');
+  const dots = coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="3.5" fill="var(--accent)"><title>${c.val}</title></circle>`).join('');
+  const lastC = coords[coords.length-1];
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">VERLAUF</div>
+      <div class="chart-wrap">
+        <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+          <defs><linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+          </linearGradient></defs>
+          <path d="${path} L${lastC.x},${svgH-22} L${coords[0].x},${svgH-22} Z" fill="url(#lineGrad)"/>
+          <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          ${dots}
+          <text x="${lastC.x}" y="${lastC.y-9}" text-anchor="middle" fill="var(--gold)" font-size="9" font-family="Inter" font-weight="700">${lastC.val}</text>
+          <line x1="14" y1="${svgH-22}" x2="${svgW-14}" y2="${svgH-22}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+          ${coords.map((c,i) => i%Math.max(1,Math.floor(n/5))===0 ? `<text x="${c.x}" y="${svgH-6}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="7" font-family="Inter">${c.date}</text>` : '').join('')}
+        </svg>
+      </div>
+    </div>`;
+}
 
-  // Sleep analysis
-  if (sleepData.length >= 3) {
-    const recent7 = sleepData.slice(0, 7);
-    const avgHours = recent7.reduce((a, b) => a + b.hours, 0) / recent7.length;
-    const avgQuality = recent7.reduce((a, b) => a + b.quality, 0) / recent7.length;
+// ============================================================
+// WORKOUT MODAL
+// ============================================================
+function openWorkoutModal(exId) {
+  modalExerciseId = exId;
+  modalSets = [];
+  modalStepperVals = {};
+  const ex = EXERCISES[exId];
+  ex.fields.forEach(f => { if (f.type === 'stepper') modalStepperVals[f.id] = f.default; });
+  document.getElementById('modalTitle').textContent = ex.name;
+  renderModalInputs();
+  renderModalSets();
+  document.getElementById('workoutModal').style.display = 'flex';
+}
 
-    if (avgHours < 7) {
-      recs.push({
-        icon: '😴',
-        title: 'SCHLAF VERBESSERN',
-        text: `Du schläfst durchschnittlich nur ${avgHours.toFixed(1)} Stunden – zu wenig für optimale Regeneration! Kletterathlet:innen brauchen 7.5–9h. Deine Fingersehnen regenerieren hauptsächlich im Schlaf. Versuche, 30 Min früher ins Bett zu gehen.`
-      });
-    } else if (avgHours >= 8) {
-      recs.push({
-        icon: '🌟',
-        title: 'SUPER SCHLAF-BASIS',
-        text: `Dein Ø-Schlaf von ${avgHours.toFixed(1)}h ist exzellent! Das gibt dir eine starke Basis für intensive Trainingseinheiten. Nutze diesen Vorteil für anspruchsvolle Übungen wie Hangboard oder Zusatzgewicht.`
-      });
-    }
+function closeWorkoutModal(e) {
+  if (e.target.id === 'workoutModal') closeWorkoutModalDirect();
+}
+function closeWorkoutModalDirect() {
+  document.getElementById('workoutModal').style.display = 'none';
+}
 
-    if (avgQuality <= 2.5) {
-      recs.push({
-        icon: '🌿',
-        title: 'SCHLAFQUALITÄT OPTIMIEREN',
-        text: 'Deine Schlafqualität ist niedrig. Tipps: Kein Bildschirm 1h vor dem Schlafen, Zimmertemperatur 16-18°C, kein intensives Training 3h vor dem Schlafen. Magnesium kann Muskelentspannung fördern.'
-      });
-    }
+function renderModalInputs() {
+  const ex = EXERCISES[modalExerciseId];
+  const container = document.getElementById('modalInputs');
+  container.innerHTML = ex.fields.map(f => {
+    if (f.type !== 'stepper') return '';
+    const val = modalStepperVals[f.id];
+    return `<div class="input-group">
+      <label class="input-label">${f.label}</label>
+      <div class="stepper">
+        <button class="stepper-btn" onclick="modalStep('${f.id}', -${f.step})">−</button>
+        <span class="stepper-val" id="msv_${f.id}">${val % 1 === 0 ? val : val.toFixed(1)}</span>
+        <span class="stepper-unit">${f.unit}</span>
+        <button class="stepper-btn" onclick="modalStep('${f.id}', ${f.step})">+</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function modalStep(fId, delta) {
+  const ex = EXERCISES[modalExerciseId];
+  const field = ex.fields.find(f => f.id === fId);
+  let val = modalStepperVals[fId] + delta;
+  val = Math.min(field.max, Math.max(field.min, val));
+  val = Math.round(val / field.step) * field.step;
+  if (field.step < 1) val = parseFloat(val.toFixed(1));
+  modalStepperVals[fId] = val;
+  const el = document.getElementById('msv_' + fId);
+  if (el) el.textContent = val % 1 === 0 ? val : val.toFixed(1);
+}
+
+function addModalSet() {
+  const ex = EXERCISES[modalExerciseId];
+  const set = { id: Date.now() };
+  ex.fields.forEach(f => { set[f.id] = modalStepperVals[f.id]; });
+  modalSets.push(set);
+  renderModalSets();
+  showToast(`Set ${modalSets.length} hinzugefügt!`);
+}
+
+function deleteModalSet(idx) {
+  modalSets.splice(idx, 1);
+  renderModalSets();
+}
+
+function renderModalSets() {
+  const ex = EXERCISES[modalExerciseId];
+  const container = document.getElementById('modalSetsContainer');
+  const thead = document.getElementById('modalSetsHeader');
+  const tbody = document.getElementById('modalSetsBody');
+  if (modalSets.length === 0) { container.style.display = 'none'; return; }
+  container.style.display = 'block';
+  thead.innerHTML = ['#', ...ex.fields.map(f => f.label.split(' ')[0]), ''].map(h => `<th>${h}</th>`).join('');
+  tbody.innerHTML = modalSets.map((set, i) => {
+    const cells = ex.fields.map(f => `<td>${set[f.id]}${f.unit ? `<small style="color:var(--t3);font-size:0.65rem"> ${f.unit}</small>` : ''}</td>`).join('');
+    return `<tr><td style="color:var(--t3)">${i+1}</td>${cells}<td><button class="delete-set-btn" onclick="deleteModalSet(${i})">✕</button></td></tr>`;
+  }).join('');
+}
+
+async function saveModalWorkout() {
+  if (modalSets.length === 0) { showToast('Füge zuerst mindestens 1 Set hinzu!'); return; }
+  const ex = EXERCISES[modalExerciseId];
+  const viewMap = { pullups: 'klimmzuege', hangboard: 'fingerboard', deadhang: 'deadhang', lsit: 'lsit' };
+  let workout = {
+    id: Date.now(),
+    date: new Date().toISOString().split('T')[0] + 'T12:00:00.000Z',
+    exerciseId: ex.id,
+    exerciseName: ex.name,
+    exerciseIcon: ex.icon,
+    sets: [...modalSets],
+    notes: ''
+  };
+  workout = await saveWorkoutToDB(workout);
+  workouts.unshift(workout);
+  saveData('cl_workouts', workouts);
+  showToast('💪 WORKOUT GESPEICHERT!');
+  closeWorkoutModalDirect();
+  const vk = viewMap[ex.id] || ex.id;
+  renderExerciseView(ex.id, vk);
+  renderCoaches();
+}
+
+// ============================================================
+// KLETTERROUTEN
+// ============================================================
+// Grade ordering for the rock wall
+const GRADE_ORDER = ['4','5a','5b','5c','6a','6a+','6b','6b+','6c','6c+','7a','7a+','7b','7b+','7c','7c+','8a','8a+','8b','8b+','8c','9a'];
+
+// Quickdraw positions on the rock (fixed layout)
+const QUICKDRAW_POSITIONS = [
+  { x: 130, y: 460 }, { x: 200, y: 445 }, { x: 85, y: 430 },
+  { x: 255, y: 415 }, { x: 160, y: 395 }, { x: 105, y: 370 },
+  { x: 225, y: 355 }, { x: 75, y: 335 }, { x: 175, y: 315 },
+  { x: 260, y: 300 }, { x: 120, y: 285 }, { x: 195, y: 265 },
+  { x: 80, y: 250 }, { x: 245, y: 235 }, { x: 155, y: 215 },
+  { x: 105, y: 195 }, { x: 215, y: 180 }, { x: 165, y: 155 },
+  { x: 130, y: 130 }, { x: 200, y: 110 }, { x: 155, y: 85 },
+  { x: 175, y: 60 }
+];
+
+// Color ramp for ascent count
+function gradeColor(count, flash) {
+  if (flash && count === 1) return '#FFD700'; // gold flash
+  if (count >= 10) return '#FF00FF';
+  if (count >= 7) return '#FF3399';
+  if (count >= 5) return '#FF6B35';
+  if (count >= 3) return '#FFD60A';
+  if (count >= 2) return '#30D158';
+  return '#6699CC';
+}
+
+function gradeGlow(count) {
+  if (count >= 10) return '0 0 12px rgba(255,0,255,0.8)';
+  if (count >= 7) return '0 0 10px rgba(255,51,153,0.7)';
+  if (count >= 5) return '0 0 8px rgba(255,107,53,0.6)';
+  if (count >= 3) return '0 0 6px rgba(255,214,10,0.5)';
+  return 'none';
+}
+
+function flashFillAmount(count, flashCount) {
+  // bar fill: each normal ascent = 8%, each flash = 20%, max 100%
+  const fill = Math.min(100, count * 8 + flashCount * 12);
+  return fill;
+}
+
+async function addRoute() {
+  const grade = document.getElementById('routeGrade').value;
+  const flash = document.getElementById('routeFlash').checked;
+  let entry = { id: Date.now(), grade, flash, date: new Date().toISOString() };
+  entry = await saveRouteToDB(entry);
+  routeEntries.unshift(entry);
+  saveData('cl_routes', routeEntries);
+  showToast(flash ? `⚡ Flash! ${grade} geloggt!` : `✅ ${grade} geloggt!`);
+  document.getElementById('routeFlash').checked = false;
+  renderRouteWall();
+}
+
+function renderRouteWall() {
+  const g = document.getElementById('quickdrawsGroup');
+  if (!g) return;
+
+  // Count per grade
+  const counts = {}; // { grade: { total, flash } }
+  routeEntries.forEach(r => {
+    if (!counts[r.grade]) counts[r.grade] = { total: 0, flash: 0 };
+    counts[r.grade].total++;
+    if (r.flash) counts[r.grade].flash++;
+  });
+
+  // Build quickdraws for each grade that has entries, placed at fixed positions
+  const gradesToShow = GRADE_ORDER.filter(g => counts[g]);
+  let svg = '';
+
+  gradesToShow.forEach((grade, idx) => {
+    if (idx >= QUICKDRAW_POSITIONS.length) return;
+    const pos = QUICKDRAW_POSITIONS[idx];
+    const { total, flash } = counts[grade];
+    const color = gradeColor(total, flash > 0);
+    const fill = flashFillAmount(total, flash);
+    const barW = 44;
+    const filledW = Math.round(barW * fill / 100);
+
+    // Quickdraw SVG (two oval biners + sling)
+    svg += `
+      <g transform="translate(${pos.x - 22}, ${pos.y - 28})">
+        <!-- top biner -->
+        <ellipse cx="22" cy="5" rx="7" ry="4.5" fill="none" stroke="${color}" stroke-width="2.5" opacity="0.9"/>
+        <!-- sling -->
+        <rect x="20" y="9" width="4" height="18" rx="2" fill="${color}" opacity="0.55"/>
+        <!-- bottom biner -->
+        <ellipse cx="22" cy="31" rx="7" ry="4.5" fill="none" stroke="${color}" stroke-width="2.5" opacity="0.9"/>
+        <!-- grade label bg -->
+        <rect x="0" y="38" width="${barW}" height="14" rx="4" fill="rgba(0,0,0,0.7)"/>
+        <!-- progress bar bg -->
+        <rect x="1" y="54" width="${barW-2}" height="5" rx="2.5" fill="rgba(255,255,255,0.12)"/>
+        <!-- progress bar fill -->
+        <rect x="1" y="54" width="${Math.max(2,filledW-2)}" height="5" rx="2.5" fill="${color}" opacity="0.85"/>
+        <!-- grade text -->
+        <text x="${barW/2}" y="48.5" text-anchor="middle" fill="${color}" font-size="8.5" font-family="Inter" font-weight="700" letter-spacing="0.3">${grade}</text>
+        ${total > 1 ? `<text x="${barW/2}" y="37.5" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="6.5" font-family="Inter">${total}×</text>` : ''}
+        ${flash > 0 ? `<text x="${barW-3}" y="37.5" text-anchor="end" fill="#FFD700" font-size="7" font-family="Inter">⚡</text>` : ''}
+      </g>`;
+  });
+
+  // Unfilled quickdraws for remaining positions (faint)
+  const remaining = GRADE_ORDER.filter(g => !counts[g]).slice(0, Math.max(0, QUICKDRAW_POSITIONS.length - gradesToShow.length));
+  remaining.forEach((_, idx2) => {
+    const posIdx = gradesToShow.length + idx2;
+    if (posIdx >= QUICKDRAW_POSITIONS.length) return;
+    const pos = QUICKDRAW_POSITIONS[posIdx];
+    svg += `
+      <g transform="translate(${pos.x - 9}, ${pos.y - 20})" opacity="0.15">
+        <ellipse cx="9" cy="5" rx="7" ry="4.5" fill="none" stroke="#888" stroke-width="2"/>
+        <rect x="7" y="9" width="4" height="16" rx="2" fill="#888" opacity="0.4"/>
+        <ellipse cx="9" cy="29" rx="7" ry="4.5" fill="none" stroke="#888" stroke-width="2"/>
+      </g>`;
+  });
+
+  g.innerHTML = svg;
+}
+
+// ============================================================
+// AI COACHES
+// ============================================================
+function renderCoaches() {
+  renderSleepCoach();
+  renderExerciseCoach('pullups', 'klimmzuege');
+  renderExerciseCoach('hangboard', 'fingerboard');
+  renderExerciseCoach('deadhang', 'deadhang');
+  renderExerciseCoach('lsit', 'lsit');
+}
+
+function renderSleepCoach() {
+  const el = document.getElementById('sleepCoachContent');
+  if (!el) return;
+  const tips = getSleepTips();
+  if (tips.length === 0) {
+    el.innerHTML = `<div class="coach-tip">Starte mit dem Schlaf-Tracking – dann gibt es hier personalisierte Tipps!</div>`;
+    return;
+  }
+  el.innerHTML = tips.map(t => `<div class="coach-tip"><span class="coach-tip-icon">${t.icon}</span><div><strong>${t.title}</strong><div class="coach-tip-text">${t.text}</div></div></div>`).join('');
+}
+
+function getSleepTips() {
+  const tips = [];
+  if (sleepData.length < 2) return tips;
+  const recent = sleepData.slice(0, 7);
+  const avg = recent.reduce((a,b)=>a+b.hours,0)/recent.length;
+  const avgQ = recent.reduce((a,b)=>a+b.quality,0)/recent.length;
+  const score = Math.round((avg/8)*50+(avgQ/5)*50);
+  if (avg < 7) tips.push({ icon:'😴', title:'Mehr Schlaf!', text:`Du schläfst Ø ${avg.toFixed(1)}h – für Kletterathlet:innen sind 7.5–9h optimal. Fingersehnen regenerieren hauptsächlich nachts.` });
+  else if (avg >= 8) tips.push({ icon:'🌟', title:'Exzellente Schlafbasis!', text:`${avg.toFixed(1)}h Ø-Schlaf ist top! Nutze diese Energie für intensive Hangboard- oder Klimmzugeinheiten.` });
+  if (avgQ <= 2.5) tips.push({ icon:'🌿', title:'Schlafqualität verbessern', text:'Kein Bildschirm 1h vor dem Schlafen, Zimmer auf 16–18°C halten, kein Training 3h vor dem Einschlafen.' });
+  if (score >= 80) tips.push({ icon:'💪', title:'Perfekter Trainingstag heute!', text:'Mit deinem aktuellen Schlaf-Score bist du optimal erholt. Heute ideal für ein Max-Effort-Workout!' });
+  return tips;
+}
+
+function renderExerciseCoach(exId, viewKey) {
+  const el = document.getElementById(viewKey + '-coach');
+  if (!el) return;
+  const data = workouts.filter(w => w.exerciseId === exId);
+  const tips = getExerciseTips(exId, data);
+  if (tips.length === 0) {
+    el.innerHTML = `<div class="coach-tip">Logge mehr Workouts – dann erscheinen hier personalisierte Tipps!</div>`;
+    return;
+  }
+  el.innerHTML = tips.map(t => `<div class="coach-tip"><span class="coach-tip-icon">${t.icon}</span><div><strong>${t.title}</strong><div class="coach-tip-text">${t.text}</div></div></div>`).join('');
+}
+
+function getExerciseTips(exId, data) {
+  const tips = [];
+  if (data.length < 2) return tips;
+  const allSets = data.flatMap(w => w.sets);
+  const recent7 = data.filter(w => {
+    const diff = (Date.now() - new Date(w.date)) / 86400000;
+    return diff <= 7;
+  });
+
+  if (exId === 'pullups') {
+    const maxReps = Math.max(...allSets.map(s => s.reps || 0));
+    if (maxReps >= 15) tips.push({ icon:'⚖️', title:'Zeit für Zusatzgewicht!', text:`${maxReps} Reps – du bist bereit für gewichtete Klimmzüge. Starte mit +5kg für 5 Reps, steigere alle 2 Wochen.` });
+    else if (maxReps < 5) tips.push({ icon:'🎯', title:'Aufbauphase', text:'Fokus auf negative Klimmzüge und Bänder-Unterstützung. 3–5 Sets täglich bringt dich schnell zu deinen ersten sauberen Reps.' });
+  }
+  if (exId === 'hangboard') {
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
+    if (maxDur >= 20) tips.push({ icon:'🏋️', title:'Zusatzgewicht hinzufügen', text:`${maxDur}s ist stark! Versuche schrittweise Gewicht hinzuzufügen – auch +2.5kg trainiert die Griffkraft intensiv.` });
+    else tips.push({ icon:'🪨', title:'Fingerboard Grundsatz', text:'7–10sek Hängen auf 20mm Leiste mit Pause ist effektiver als langes Hängen. Priorität: Qualität der Griffposition.' });
+  }
+  if (exId === 'deadhang') {
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
+    tips.push({ icon:'⏱️', title:'Dead Hang Ziel', text:`Dein Rekord: ${maxDur}s. Das Pro-Ziel: 60s mit Körpergewicht, 30s mit 50% Körpergewicht als Zusatz.` });
+  }
+  if (exId === 'lsit') {
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
+    if (maxDur < 10) tips.push({ icon:'💡', title:'L-Sit Aufbau', text:'Starte mit Tuck L-Sit (Knie angezogen). Ziel: 10s gehaltener L-Sit – das stärkt Rumpf und Schultern enorm fürs Klettern.' });
+    else tips.push({ icon:'🔥', title:`Starker Kern – ${maxDur}s!`, text:'Versuche L-Sit auf Ringen für mehr Schulteraktivierung. Das verbessert direkt deine Zugkraft am Fels.' });
   }
 
-  // Training frequency analysis
-  if (workouts.length >= 3) {
-    const last7Days = workouts.filter(w => {
-      const d = new Date(w.date);
-      const diff = (now - d) / (1000 * 60 * 60 * 24);
-      return diff <= 7;
-    });
-
-    const last14Days = workouts.filter(w => {
-      const d = new Date(w.date);
-      const diff = (now - d) / (1000 * 60 * 60 * 24);
-      return diff <= 14;
-    });
-
-    if (last7Days.length >= 5) {
-      recs.push({
-        icon: '⚠️',
-        title: 'ÜBERTRAINING WARNUNG',
-        text: `Du hast ${last7Days.length}x in den letzten 7 Tagen trainiert! Für Kletterer gilt: Fingersehnen brauchen 48-72h Regeneration. Plane mindestens 2 Ruhetage pro Woche ein, sonst riskierst du Ringbandverletzungen.`
-      });
-    } else if (last7Days.length === 0 && workouts.length > 0) {
-      recs.push({
-        icon: '🔥',
-        title: 'ZURÜCK AN DEN BOARD!',
-        text: 'Du hast diese Woche noch nicht trainiert. Selbst ein kurzes 20-Min Hangboard-Session hält die Fingerkraft aufrecht. Dranbleiben ist der Schlüssel zum Fortschritt!'
-      });
-    }
-
-    // Progression check
-    const hangboardWorkouts = workouts.filter(w => w.exerciseId === 'hangboard' || w.exerciseId === 'hangboard_weight' || w.exerciseId === 'deadhang');
-    const pullupWorkouts = workouts.filter(w => w.exerciseId === 'pullups' || w.exerciseId === 'pullups_weight');
-
-    if (hangboardWorkouts.length >= 3) {
-      const last = hangboardWorkouts[0].sets;
-      const maxDur = Math.max(...last.map(s => s.duration || 0));
-      recs.push({
-        icon: '🪨',
-        title: 'HANGBOARD PROGRESSION',
-        text: `Deine längste Hangezeit: ${maxDur} Sekunden. Das Ziel für Fortgeschrittene: 10-sek Hängen mit Körpergewicht + 50% auf einer 20mm Leiste. Steigere schrittweise um 2.5kg oder 2-3sek alle 2 Wochen.`
-      });
-    }
-
-    if (pullupWorkouts.length >= 3) {
-      const weightedPullups = workouts.filter(w => w.exerciseId === 'pullups_weight');
-      if (weightedPullups.length >= 2) {
-        const maxWeights = weightedPullups.map(w => Math.max(...w.sets.map(s => s.weight || 0)));
-        const trend = maxWeights[0] > maxWeights[maxWeights.length - 1];
-        if (trend) {
-          recs.push({
-            icon: '📈',
-            title: 'GEWICHT STEIGT – TOP!',
-            text: `Dein Gewicht bei Klimmzügen steigt – das ist ein klares Zeichen für echte Kraftzunahme! Für maximale Kletterperformance: 1-5 Reps mit schwerem Gewicht für relative Kraft (Gewicht/Körpergewicht).`
-          });
-        }
-      }
-    }
+  // Frequency check
+  if (recent7.length >= 4) {
+    tips.push({ icon:'⚠️', title:'Erholung nicht vergessen', text:'Viele Einheiten diese Woche – plane morgen einen Ruhetag ein. Sehnen brauchen 48–72h Regeneration.' });
+  } else if (recent7.length === 0 && data.length > 0) {
+    tips.push({ icon:'🔥', title:'Zurück ans Training!', text:'Diese Woche noch nichts geloggt. Selbst 15 Minuten halten die Kraft aufrecht.' });
   }
 
-  // Sleep + Training correlation
-  if (sleepData.length >= 3 && workouts.length >= 3) {
-    const last3Sleep = sleepData.slice(0, 3);
-    const avgRecentSleep = last3Sleep.reduce((a, b) => a + b.hours, 0) / last3Sleep.length;
-
-    if (avgRecentSleep < 6.5) {
-      recs.push({
-        icon: '🔄',
-        title: 'SCHLAF-TRAINING BALANCE',
-        text: 'Dein Schlaf war zuletzt knapp. Empfehlung: Reduziere heute die Trainingsintensität um 30%. Statt schwerem Hangboard lieber lockeres Klettern oder Mobilitätsarbeit. Qualität über Quantität!'
-      });
-    } else if (avgRecentSleep >= 8) {
-      recs.push({
-        icon: '💪',
-        title: 'PERFEKTER ZEITPUNKT',
-        text: `Mit ${avgRecentSleep.toFixed(1)}h Schlaf bist du top erholt! Heute ist der ideale Tag für ein Maximum-Effort Training: Hangboard, schwere Klimmzüge oder einen schwierigen Boulder-Durchstieg. Du bist bereit!`
-      });
-    }
-  }
-
-  // General tips if not much data
-  if (workouts.length < 3) {
-    recs.push({
-      icon: '🎯',
-      title: 'STARTE DEIN TRACKING',
-      text: 'Logge mindestens 5 Workouts, damit CrimpLog dir präzise Empfehlungen geben kann. Tipp: Starte mit dem Deadhang-Test – halte so lange wie möglich – und tracke diese Zahl alle 2 Wochen.'
-    });
-  }
-
-  return recs;
+  return tips;
 }
 
 // ============================================================
@@ -1260,9 +833,7 @@ function showToast(msg, duration = 2000) {
   setTimeout(() => { toast.style.display = 'none'; }, duration);
 }
 
-// ============================================================
-// INSTALL PROMPT (PWA)
-// ============================================================
+// PWA
 let deferredPrompt;
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
