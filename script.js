@@ -16,8 +16,10 @@ function showAuthMode(mode) {
   event.target.classList.add('active');
   const btn = document.getElementById('authBtn');
   btn.textContent = mode === 'login' ? 'ANMELDEN' : 'REGISTRIEREN';
-  btn.dataset.mode = mode;
+  btn.onclick = mode === 'login' ? handleAuth : handleAuth;
   document.getElementById('authError').style.display = 'none';
+  // Store mode
+  btn.dataset.mode = mode;
 }
 
 function showAuthLoading(show) {
@@ -35,10 +37,13 @@ async function handleAuth() {
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value;
   const mode = document.getElementById('authBtn').dataset.mode || 'login';
+
   if (!email || !password) { showAuthError('Bitte E-Mail und Passwort eingeben.'); return; }
   if (password.length < 6) { showAuthError('Passwort muss mindestens 6 Zeichen haben.'); return; }
+
   showAuthLoading(true);
   document.getElementById('authError').style.display = 'none';
+
   let result;
   if (mode === 'register') {
     result = await db.auth.signUp({ email, password });
@@ -50,6 +55,7 @@ async function handleAuth() {
   } else {
     result = await db.auth.signInWithPassword({ email, password });
   }
+
   if (result.error) {
     showAuthLoading(false);
     const msgs = {
@@ -59,7 +65,7 @@ async function handleAuth() {
     };
     showAuthError(msgs[result.error.message] || result.error.message);
   }
-  // success → onAuthStateChange fires
+  // If success: onAuthStateChange fires automatically
 }
 
 async function handleGoogleAuth() {
@@ -73,6 +79,7 @@ async function handleGoogleAuth() {
 async function handleLogout() {
   hideUserMenu();
   await db.auth.signOut();
+  // onAuthStateChange SIGNED_OUT handles the rest
 }
 
 function showUserMenu() {
@@ -89,69 +96,61 @@ function hideUserMenu() {
 // ============================================================
 let isLoadingFromDB = false;
 
-async function loadFromDB() {
+async function loadFromDB(force = false) {
   if (!currentUser) return;
-  if (isLoadingFromDB) return;
+  if (isLoadingFromDB) return; // prevent concurrent loads
   isLoadingFromDB = true;
   setSyncing(true);
 
   try {
-    // workouts
-    const wRes = await db.from('workouts')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .order('workout_date', { ascending: false });
-    if (!wRes.error) {
-      workouts = wRes.data.map(row => ({
-        id: row.id,
-        date: row.workout_date + 'T12:00:00.000Z',
-        exerciseId: row.exercise_id,
-        exerciseName: row.exercise_name,
-        exerciseIcon: row.exercise_icon,
-        sets: row.sets || [],
-        notes: ''
-      }));
-    }
+    const [wRes, sRes, rRes] = await Promise.all([
+      db.from('workouts').select('*').eq('user_id', currentUser.id).order('workout_date', { ascending: false }),
+      db.from('sleep_entries').select('*').eq('user_id', currentUser.id).order('sleep_date', { ascending: false }),
+      db.from('routes').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: false })
+    ]);
 
-    // sleep
-    const sRes = await db.from('sleep_entries')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .order('sleep_date', { ascending: false });
-    if (!sRes.error) {
-      sleepData = sRes.data.map(row => ({
-        id: row.id,
-        date: row.sleep_date,
-        hours: parseFloat(row.hours) || 0,
-        quality: row.quality || 3,
-        bedtime: row.bedtime,
-        wakeup: row.wakeup,
-        hrv: row.hrv,
-        notes: row.notes || ''
-      }));
-    }
+    if (wRes.error) throw wRes.error;
+    if (sRes.error) throw sRes.error;
+    if (rRes.error) throw rRes.error;
 
-    // routes – table may not exist yet, ignore error gracefully
-    const rRes = await db.from('routes')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .order('created_at', { ascending: false });
-    if (!rRes.error && rRes.data) {
-      routeEntries = rRes.data.map(row => ({
-        id: row.id,
-        grade: row.grade,
-        flash: row.flash || false,
-        date: row.created_at
-      }));
-    }
+    workouts = wRes.data.map(row => ({
+      id: row.id,
+      date: row.workout_date + 'T12:00:00.000Z',
+      exerciseId: row.exercise_id,
+      exerciseName: row.exercise_name,
+      exerciseIcon: row.exercise_icon,
+      sets: row.sets,
+      notes: ''
+    }));
+
+    sleepData = sRes.data.map(row => ({
+      id: row.id,
+      date: row.sleep_date,
+      hours: parseFloat(row.hours) || 0,
+      quality: row.quality || 3,
+      bedtime: row.bedtime,
+      wakeup: row.wakeup,
+      hrv: row.hrv,
+      notes: row.notes || ''
+    }));
+
+    routes = rRes.data.map(row => ({
+      id: row.id,
+      grade: row.grade,
+      flash: row.flash,
+    }));
+
+    renderAll();
   } catch (err) {
-    // network offline etc – keep in-memory data
-    console.warn('loadFromDB error:', err);
+    // Offline: keep whatever data we already have in memory
+    if (workouts.length === 0 && sleepData.length === 0 && routes.length === 0) {
+      showToast('\u26a0\ufe0f Offline \u2013 keine Daten verf\u00fcgbar');
+    }
+    renderAll();
+  } finally {
+    setSyncing(false);
+    isLoadingFromDB = false;
   }
-
-  setSyncing(false);
-  isLoadingFromDB = false;
-  renderAll();
 }
 
 async function saveWorkoutToDB(workout) {
@@ -268,7 +267,7 @@ function loadData(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
 }
 function saveData(key, data) {
-  try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(data));
 }
 
 let workouts    = loadData('cl_workouts', []);
