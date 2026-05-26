@@ -327,3 +327,65 @@ select.input-field { background-image: url("data:image/svg+xml,%3Csvg xmlns='htt
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
 @keyframes spin { to { transform:rotate(360deg); } }
 @keyframes glow { 0%,100% { box-shadow:0 0 24px rgba(255,107,53,0.3); } 50% { box-shadow:0 0 40px rgba(255,107,53,0.55); } }
+
+/* ===================== INLINE EXERCISE FORM ===================== */
+.inline-form-card { margin-bottom: 14px; padding: 16px; }
+
+.inline-fields-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.inline-field {}
+.inline-field-label {
+  font-size: 0.7rem; font-weight: 600; color: var(--t2);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+/* Add entry button – pill style, full width */
+.add-entry-btn {
+  border-radius: 50px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 13px;
+}
+
+/* ===================== ROUTE ADD ===================== */
+.route-add-fields {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.flash-label {
+  display: flex; align-items: center; gap: 8px;
+  cursor: pointer; user-select: none;
+  padding-bottom: 1px;
+  flex-shrink: 0;
+}
+.flash-checkbox { position: absolute; opacity: 0; width: 0; height: 0; }
+.flash-custom-cb {
+  width: 28px; height: 28px; border-radius: 8px;
+  border: 2px solid var(--sep2); background: var(--bg4);
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; flex-shrink: 0;
+}
+.flash-checkbox:checked + .flash-custom-cb {
+  background: var(--gold); border-color: var(--gold);
+}
+.flash-checkbox:checked + .flash-custom-cb::after {
+  content: '✓'; color: #000; font-size: 0.9rem; font-weight: 800;
+}
+.flash-text {
+  font-size: 0.78rem; font-weight: 700; color: var(--t2);
+  letter-spacing: 0.5px; white-space: nowrap;
+}
+
+/* ===================== COACH ===================== */
+.coach-tip-empty {
+  font-size: 0.8rem; color: var(--t3); padding: 6px 0;
+}

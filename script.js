@@ -59,10 +59,14 @@ async function handleAuth() {
     };
     showAuthError(msgs[result.error.message] || result.error.message);
   }
+  // success → onAuthStateChange fires
 }
 
 async function handleGoogleAuth() {
-  const { error } = await db.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.href } });
+  const { error } = await db.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.href }
+  });
   if (error) showAuthError('Google Login fehlgeschlagen: ' + error.message);
 }
 
@@ -81,46 +85,57 @@ function hideUserMenu() {
 }
 
 // ============================================================
-// DATABASE
+// DATABASE – robust, separate fetches so one failure ≠ total fail
 // ============================================================
 let isLoadingFromDB = false;
 
-async function loadFromDB(force = false) {
+async function loadFromDB() {
   if (!currentUser) return;
   if (isLoadingFromDB) return;
   isLoadingFromDB = true;
   setSyncing(true);
+
   try {
-    const [wRes, sRes, rRes] = await Promise.all([
-      db.from('workouts').select('*').eq('user_id', currentUser.id).order('workout_date', { ascending: false }),
-      db.from('sleep_entries').select('*').eq('user_id', currentUser.id).order('sleep_date', { ascending: false }),
-      db.from('routes').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: false })
-    ]);
-    if (wRes.error) throw wRes.error;
-    if (sRes.error) throw sRes.error;
+    // workouts
+    const wRes = await db.from('workouts')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('workout_date', { ascending: false });
+    if (!wRes.error) {
+      workouts = wRes.data.map(row => ({
+        id: row.id,
+        date: row.workout_date + 'T12:00:00.000Z',
+        exerciseId: row.exercise_id,
+        exerciseName: row.exercise_name,
+        exerciseIcon: row.exercise_icon,
+        sets: row.sets || [],
+        notes: ''
+      }));
+    }
 
-    workouts = wRes.data.map(row => ({
-      id: row.id,
-      date: row.workout_date + 'T12:00:00.000Z',
-      exerciseId: row.exercise_id,
-      exerciseName: row.exercise_name,
-      exerciseIcon: row.exercise_icon,
-      sets: row.sets,
-      notes: ''
-    }));
+    // sleep
+    const sRes = await db.from('sleep_entries')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('sleep_date', { ascending: false });
+    if (!sRes.error) {
+      sleepData = sRes.data.map(row => ({
+        id: row.id,
+        date: row.sleep_date,
+        hours: parseFloat(row.hours) || 0,
+        quality: row.quality || 3,
+        bedtime: row.bedtime,
+        wakeup: row.wakeup,
+        hrv: row.hrv,
+        notes: row.notes || ''
+      }));
+    }
 
-    sleepData = sRes.data.map(row => ({
-      id: row.id,
-      date: row.sleep_date,
-      hours: parseFloat(row.hours) || 0,
-      quality: row.quality || 3,
-      bedtime: row.bedtime,
-      wakeup: row.wakeup,
-      hrv: row.hrv,
-      notes: row.notes || ''
-    }));
-
-    // routes may not have table yet – fallback gracefully
+    // routes – table may not exist yet, ignore error gracefully
+    const rRes = await db.from('routes')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false });
     if (!rRes.error && rRes.data) {
       routeEntries = rRes.data.map(row => ({
         id: row.id,
@@ -129,17 +144,14 @@ async function loadFromDB(force = false) {
         date: row.created_at
       }));
     }
-
-    renderAll();
   } catch (err) {
-    if (workouts.length === 0 && sleepData.length === 0) {
-      showToast('⚠️ Offline – keine Daten verfügbar');
-    }
-    renderAll();
-  } finally {
-    setSyncing(false);
-    isLoadingFromDB = false;
+    // network offline etc – keep in-memory data
+    console.warn('loadFromDB error:', err);
   }
+
+  setSyncing(false);
+  isLoadingFromDB = false;
+  renderAll();
 }
 
 async function saveWorkoutToDB(workout) {
@@ -186,20 +198,18 @@ async function saveSleepToDB(entry) {
 async function saveRouteToDB(entry) {
   if (!currentUser) return entry;
   setSyncing(true);
-  try {
-    const { data, error } = await db.from('routes').insert({
-      user_id: currentUser.id,
-      grade: entry.grade,
-      flash: entry.flash
-    }).select().single();
-    setSyncing(false);
-    if (error) throw error;
-    return { ...entry, id: data.id, date: data.created_at };
-  } catch(e) {
-    setSyncing(false);
-    // table might not exist yet, that's ok
+  const { data, error } = await db.from('routes').insert({
+    user_id: currentUser.id,
+    grade: entry.grade,
+    flash: entry.flash
+  }).select().single();
+  setSyncing(false);
+  if (error) {
+    // table likely doesn't exist – save local only
+    console.warn('routes table missing:', error.message);
     return entry;
   }
+  return { ...entry, id: data.id, date: data.created_at };
 }
 
 function setSyncing(active) {
@@ -209,10 +219,10 @@ function setSyncing(active) {
 
 function renderAll() {
   renderSleepView();
-  renderExerciseView('pullups', 'klimmzuege');
-  renderExerciseView('hangboard', 'fingerboard');
+  renderExerciseView('pullups',  'klimmzuege');
+  renderExerciseView('hangboard','fingerboard');
   renderExerciseView('deadhang', 'deadhang');
-  renderExerciseView('lsit', 'lsit');
+  renderExerciseView('lsit',     'lsit');
   renderRouteWall();
   renderCoaches();
 }
@@ -224,55 +234,53 @@ const EXERCISES = {
   pullups: {
     id: 'pullups', name: 'KLIMMZÜGE', icon: '🧗',
     fields: [
-      { id: 'reps', label: 'Wiederholungen', type: 'stepper', min: 1, max: 50, step: 1, default: 8, unit: 'reps' },
-      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 20, step: 1, default: 3, unit: 'sets' },
-      { id: 'weight', label: 'Zusatzgewicht (kg)', type: 'stepper', min: 0, max: 9999, step: 2.5, default: 0, unit: 'kg' }
+      { id: 'reps',   label: 'Wiederholungen',    type: 'stepper', min: 1,  max: 50,   step: 1,   default: 8,  unit: 'reps' },
+      { id: 'weight', label: 'Zusatzgewicht (kg)', type: 'stepper', min: 0,  max: 9999, step: 2.5, default: 0,  unit: 'kg'   }
     ]
   },
   hangboard: {
     id: 'hangboard', name: 'FINGERBOARD', icon: '🪨',
     fields: [
-      { id: 'duration', label: 'Haltedauer (Sek.)', type: 'stepper', min: 5, max: 120, step: 5, default: 10, unit: 'sek' },
-      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 20, step: 1, default: 6, unit: 'sets' },
-      { id: 'weight', label: 'Zusatzgewicht (kg)', type: 'stepper', min: 0, max: 9999, step: 2.5, default: 0, unit: 'kg' }
+      { id: 'duration', label: 'Haltedauer (Sek.)', type: 'stepper', min: 1,  max: 120,  step: 1,   default: 10, unit: 'sek' },
+      { id: 'sets',     label: 'Sätze',             type: 'stepper', min: 1,  max: 20,   step: 1,   default: 6,  unit: 'sätze' },
+      { id: 'weight',   label: 'Zusatzgew. (kg)',   type: 'stepper', min: 0,  max: 9999, step: 2.5, default: 0,  unit: 'kg'  }
     ]
   },
   deadhang: {
     id: 'deadhang', name: 'DEAD HANG', icon: '⏱️',
     fields: [
-      { id: 'duration', label: 'Dauer (Sek.)', type: 'stepper', min: 5, max: 300, step: 5, default: 30, unit: 'sek' }
+      { id: 'duration', label: 'Dauer (Sek.)', type: 'stepper', min: 1, max: 300, step: 1, default: 30, unit: 'sek' }
     ]
   },
   lsit: {
     id: 'lsit', name: 'L-SIT', icon: '💪',
     fields: [
       { id: 'duration', label: 'Dauer (Sek.)', type: 'stepper', min: 1, max: 120, step: 1, default: 10, unit: 'sek' },
-      { id: 'sets', label: 'Sätze', type: 'stepper', min: 1, max: 10, step: 1, default: 3, unit: 'sets' }
+      { id: 'sets',     label: 'Sätze',        type: 'stepper', min: 1, max: 10,  step: 1, default: 3,  unit: 'sätze' }
     ]
   }
 };
+
+// per-view stepper state
+const viewSteppers = {};
 
 function loadData(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
 }
 function saveData(key, data) {
-  localStorage.setItem(key, JSON.stringify(data));
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
 }
 
-let workouts = loadData('cl_workouts', []);
-let sleepData = loadData('cl_sleep', []);
+let workouts    = loadData('cl_workouts', []);
+let sleepData   = loadData('cl_sleep', []);
 let routeEntries = loadData('cl_routes', []);
-
-// Modal state
-let modalExerciseId = null;
-let modalSets = [];
-let modalStepperVals = {};
 
 // ============================================================
 // INIT
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
   initNav();
+  initViewSteppers();
   document.getElementById('sleepDate').value = new Date().toISOString().split('T')[0];
 
   db.auth.onAuthStateChange(async (event, session) => {
@@ -286,12 +294,14 @@ document.addEventListener('DOMContentLoaded', () => {
       setSyncing(false);
       return;
     }
-    const isNewLogin = event === 'SIGNED_IN' || event === 'INITIAL_SESSION';
+
+    const isNewLogin  = event === 'SIGNED_IN' || event === 'INITIAL_SESSION';
     const userChanged = currentUser?.id !== session.user.id;
+
     if (isNewLogin || userChanged) {
       currentUser = session.user;
       document.getElementById('authScreen').style.display = 'none';
-      document.getElementById('appScreen').style.display = 'block';
+      document.getElementById('appScreen').style.display  = 'block';
       document.getElementById('userMenuEmail').textContent = currentUser.email || 'Eingeloggt';
       if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
       await loadFromDB();
@@ -309,11 +319,18 @@ function initNav() {
   document.querySelectorAll('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       const view = tab.dataset.view;
-      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.nav-tab').forEach(t  => t.classList.remove('active'));
+      document.querySelectorAll('.view').forEach(v     => v.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('view-' + view).classList.add('active');
     });
+  });
+}
+
+function initViewSteppers() {
+  Object.entries(EXERCISES).forEach(([exId, ex]) => {
+    viewSteppers[exId] = {};
+    ex.fields.forEach(f => { viewSteppers[exId][f.id] = f.default; });
   });
 }
 
@@ -321,16 +338,19 @@ function initNav() {
 // SLEEP VIEW
 // ============================================================
 async function saveSleepEntry() {
-  const date = document.getElementById('sleepDate').value;
+  const date    = document.getElementById('sleepDate').value;
   const bedtime = document.getElementById('sleepBedtime').value;
-  const wakeup = document.getElementById('sleepWakeup').value;
+  const wakeup  = document.getElementById('sleepWakeup').value;
   const quality = parseInt(document.getElementById('sleepQuality').value);
-  const hrv = parseInt(document.getElementById('sleepHRV').value) || null;
-  const notes = document.getElementById('sleepNotes').value;
+  const hrv     = parseInt(document.getElementById('sleepHRV').value) || null;
+  const notes   = document.getElementById('sleepNotes').value;
+
   if (!date || !bedtime || !wakeup) { showToast('Bitte Datum & Zeiten eingeben!'); return; }
+
   const bed = parseTime(bedtime), wake = parseTime(wakeup);
   let hours = (wake - bed) / 3600;
   if (hours < 0) hours += 24;
+
   let entry = { id: Date.now(), date, bedtime, wakeup, hours: Math.round(hours * 10) / 10, quality, hrv, notes };
   entry = await saveSleepToDB(entry);
   sleepData = sleepData.filter(s => s.date !== date);
@@ -341,7 +361,7 @@ async function saveSleepEntry() {
   renderSleepView();
   renderCoaches();
   document.getElementById('sleepNotes').value = '';
-  document.getElementById('sleepHRV').value = '';
+  document.getElementById('sleepHRV').value   = '';
 }
 
 function parseTime(str) {
@@ -356,26 +376,29 @@ function renderSleepView() {
 
 function renderSleepScoreCard() {
   const el = document.getElementById('sleepScoreCard');
-  if (sleepData.length === 0) {
-    el.innerHTML = '';
-    return;
-  }
-  const recent = sleepData.slice(0, 7);
-  const avgHours = recent.reduce((a, b) => a + b.hours, 0) / recent.length;
-  const avgQuality = recent.reduce((a, b) => a + b.quality, 0) / recent.length;
-  const sleepScore = Math.round((avgHours / 8) * 50 + (avgQuality / 5) * 50);
-  const scoreColor = sleepScore >= 80 ? 'var(--green)' : sleepScore >= 60 ? 'var(--gold)' : sleepScore >= 40 ? 'var(--warn)' : 'var(--red)';
+  if (sleepData.length === 0) { el.innerHTML = ''; return; }
+  const recent    = sleepData.slice(0, 7);
+  const avgHours  = recent.reduce((a, b) => a + b.hours, 0) / recent.length;
+  const avgQuality= recent.reduce((a, b) => a + b.quality, 0) / recent.length;
+  const sleepScore= Math.round((avgHours / 8) * 50 + (avgQuality / 5) * 50);
+  const scoreColor= sleepScore >= 80 ? 'var(--green)' : sleepScore >= 60 ? 'var(--gold)' : sleepScore >= 40 ? 'var(--warn)' : 'var(--red)';
   el.innerHTML = `
     <div class="card sleep-score-big">
-      <div class="sleep-score-ring" style="--score-color:${scoreColor}">
+      <div class="sleep-score-ring">
         <div class="sleep-score-number" style="color:${scoreColor}">${sleepScore}</div>
         <div class="sleep-score-tag">SCHLAF-SCORE</div>
         <div class="sleep-score-sub">Ø letzte 7 Nächte</div>
       </div>
       <div class="sleep-meta">
-        <div class="sleep-meta-item"><span class="sleep-meta-val">${avgHours.toFixed(1)}h</span><span class="sleep-meta-label">Ø Dauer</span></div>
+        <div class="sleep-meta-item">
+          <span class="sleep-meta-val">${avgHours.toFixed(1)}h</span>
+          <span class="sleep-meta-label">Ø Dauer</span>
+        </div>
         <div class="sleep-meta-sep"></div>
-        <div class="sleep-meta-item"><span class="sleep-meta-val">${'★'.repeat(Math.round(avgQuality))}</span><span class="sleep-meta-label">Ø Qualität</span></div>
+        <div class="sleep-meta-item">
+          <span class="sleep-meta-val">${'★'.repeat(Math.round(avgQuality))}</span>
+          <span class="sleep-meta-label">Ø Qualität</span>
+        </div>
       </div>
     </div>`;
 }
@@ -386,13 +409,12 @@ function renderSleepStats() {
     container.innerHTML = `<div class="empty-state"><span class="empty-state-icon">🌙</span><div class="empty-state-text">Noch keine Schlafdaten – füge deinen ersten Eintrag hinzu!</div></div>`;
     return;
   }
-  const recent = sleepData.slice(0, 7).reverse();
-  const chartData = recent.map(s => ({ label: s.date.slice(5), value: s.hours, quality: s.quality }));
+  const recent = sleepData.slice(0, 7).slice().reverse();
   container.innerHTML = `
     <div class="card">
       <div class="card-title">LETZTE 7 NÄCHTE</div>
-      <div class="chart-wrap">${renderSleepChart(chartData)}</div>
-      <div class="sleep-list">
+      <div class="chart-wrap">${renderSleepChart(recent.map(s => ({ label: s.date.slice(5), value: s.hours })))}</div>
+      <div style="margin-top:10px;">
         ${sleepData.slice(0, 10).map(s => `
           <div class="stat-row">
             <span style="font-size:0.75rem;color:var(--t2)">${s.date}</span>
@@ -406,258 +428,215 @@ function renderSleepStats() {
 }
 
 function renderSleepChart(data) {
-  const svgW = Math.max(300, window.innerWidth - 52);
+  const svgW = Math.max(300, (window.innerWidth || 400) - 52);
   const svgH = 100;
-  const max = Math.max(...data.map(d => d.value), 8);
-  const barW = Math.floor((svgW - 20) / Math.max(data.length, 1)) - 2;
+  const max  = Math.max(...data.map(d => d.value), 8);
+  const n    = data.length;
+  const barW = Math.floor((svgW - 20) / Math.max(n, 1)) - 2;
   const bars = data.map((d, i) => {
-    const barH = Math.round((d.value / max) * 70);
+    const barH = Math.round((d.value / max) * 68);
     const x = 10 + i * (barW + 2);
-    const y = svgH - 20 - barH;
-    const color = d.value >= 7.5 ? '#FFD60A' : d.value >= 6 ? '#30D158' : '#FF6B35';
-    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${color}" opacity="0.85"/>
+    const y = svgH - 22 - barH;
+    const col = d.value >= 7.5 ? '#FFD60A' : d.value >= 6 ? '#30D158' : '#FF6B35';
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${col}" opacity="0.85"/>
       <text x="${x+barW/2}" y="${y-3}" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="8" font-family="Inter">${d.value}h</text>
-      <text x="${x+barW/2}" y="${svgH-4}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="7" font-family="Inter">${d.label}</text>`;
+      <text x="${x+barW/2}" y="${svgH-5}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="7" font-family="Inter">${d.label}</text>`;
   }).join('');
-  const refY = svgH - 20 - Math.round((8/max)*70);
+  const refY = svgH - 22 - Math.round((8 / max) * 68);
   return `<svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
     <line x1="10" y1="${refY}" x2="${svgW-10}" y2="${refY}" stroke="#FFD60A" stroke-width="1" stroke-dasharray="4,3" opacity="0.35"/>
     <text x="${svgW-12}" y="${refY-3}" text-anchor="end" fill="#FFD60A" font-size="7" font-family="Inter" opacity="0.5">8h</text>
-    <line x1="10" y1="${svgH-20}" x2="${svgW-10}" y2="${svgH-20}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+    <line x1="10" y1="${svgH-22}" x2="${svgW-10}" y2="${svgH-22}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
     ${bars}</svg>`;
 }
 
 // ============================================================
-// EXERCISE VIEWS (Klimmzüge, Fingerboard, Deadhang, L-Sit)
+// EXERCISE VIEWS – inline stepper form + log list
 // ============================================================
+const VIEW_MAP = { pullups: 'klimmzuege', hangboard: 'fingerboard', deadhang: 'deadhang', lsit: 'lsit' };
+
 function renderExerciseView(exId, viewKey) {
-  const data = workouts.filter(w => w.exerciseId === exId);
-  renderExercisePR(exId, viewKey, data);
-  renderExerciseChart(exId, viewKey, data);
+  renderExerciseForm(exId, viewKey);
+  renderExercisePR(exId, viewKey);
+  renderExerciseChart(exId, viewKey);
 }
 
-function renderExercisePR(exId, viewKey, data) {
-  const el = document.getElementById(viewKey + '-pr');
+// ---- INLINE FORM ----
+function renderExerciseForm(exId, viewKey) {
+  const container = document.getElementById(viewKey + '-form');
+  if (!container) return;
+  const ex = EXERCISES[exId];
+  const vals = viewSteppers[exId];
+
+  const fields = ex.fields.map(f => `
+    <div class="inline-field">
+      <div class="inline-field-label">${f.label}</div>
+      <div class="stepper">
+        <button class="stepper-btn" onclick="viewStep('${exId}','${f.id}',-${f.step})">−</button>
+        <span class="stepper-val" id="vs_${exId}_${f.id}">${fmtVal(vals[f.id], f)}</span>
+        <span class="stepper-unit">${f.unit}</span>
+        <button class="stepper-btn" onclick="viewStep('${exId}','${f.id}',${f.step})">+</button>
+      </div>
+    </div>`).join('');
+
+  container.innerHTML = `
+    <div class="card inline-form-card">
+      <div class="inline-fields-wrap">${fields}</div>
+      <button class="btn btn-primary add-entry-btn" onclick="addEntry('${exId}')">+ EINTRAG HINZUFÜGEN</button>
+    </div>`;
+}
+
+function fmtVal(val, field) {
+  if (field && field.step < 1) return val.toFixed(1);
+  return val;
+}
+
+function viewStep(exId, fId, delta) {
+  const ex    = EXERCISES[exId];
+  const field = ex.fields.find(f => f.id === fId);
+  let val     = (viewSteppers[exId][fId] || 0) + delta;
+  val = Math.min(field.max, Math.max(field.min, val));
+  val = Math.round(val / field.step) * field.step;
+  if (field.step < 1) val = parseFloat(val.toFixed(1));
+  viewSteppers[exId][fId] = val;
+  const el = document.getElementById(`vs_${exId}_${fId}`);
+  if (el) el.textContent = fmtVal(val, field);
+}
+
+async function addEntry(exId) {
+  const ex   = EXERCISES[exId];
+  const vals = viewSteppers[exId];
+  const set  = { id: Date.now() };
+  ex.fields.forEach(f => { set[f.id] = vals[f.id]; });
+
+  const vk   = VIEW_MAP[exId];
+  let workout = {
+    id: Date.now(),
+    date: new Date().toISOString().split('T')[0] + 'T12:00:00.000Z',
+    exerciseId:   ex.id,
+    exerciseName: ex.name,
+    exerciseIcon: ex.icon,
+    sets: [set],
+    notes: ''
+  };
+  workout = await saveWorkoutToDB(workout);
+  workouts.unshift(workout);
+  saveData('cl_workouts', workouts);
+  showToast('✅ Eintrag gespeichert!');
+  renderExerciseView(exId, vk);
+  renderCoaches();
+}
+
+// ---- PR ----
+function renderExercisePR(exId, viewKey) {
+  const el   = document.getElementById(viewKey + '-pr');
   if (!el) return;
+  const data = workouts.filter(w => w.exerciseId === exId);
   if (data.length === 0) {
     el.innerHTML = `<div class="pr-empty">Noch kein Eintrag – leg los! 🏆</div>`;
     return;
   }
-  const ex = EXERCISES[exId];
-  let prLines = [];
-  const allSets = data.flatMap(w => w.sets);
-  if (allSets.some(s => s.reps)) {
-    const maxReps = Math.max(...allSets.map(s => s.reps || 0));
-    prLines.push(`<span class="pr-val">${maxReps}</span><span class="pr-unit">reps</span>`);
-  }
-  if (allSets.some(s => s.duration)) {
-    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
-    prLines.push(`<span class="pr-val">${maxDur}</span><span class="pr-unit">sek</span>`);
-  }
-  if (allSets.some(s => s.weight > 0)) {
-    const maxW = Math.max(...allSets.map(s => s.weight || 0));
-    prLines.push(`<span class="pr-val">${maxW}</span><span class="pr-unit">kg</span>`);
-  }
+  const allSets = data.flatMap(w => w.sets || []);
+  let prParts = [];
+  if (allSets.some(s => s.reps > 0))     prParts.push(`<span class="pr-val">${Math.max(...allSets.map(s=>s.reps||0))}</span><span class="pr-unit"> reps</span>`);
+  if (allSets.some(s => s.duration > 0)) prParts.push(`<span class="pr-val">${Math.max(...allSets.map(s=>s.duration||0))}</span><span class="pr-unit"> sek</span>`);
+  if (allSets.some(s => s.weight > 0))   prParts.push(`<span class="pr-val">${Math.max(...allSets.map(s=>s.weight||0))}</span><span class="pr-unit"> kg</span>`);
   el.innerHTML = `
     <div class="card pr-card">
       <div class="pr-label">🏆 BESTLEISTUNG</div>
-      <div class="pr-values">${prLines.join('<span class="pr-sep">·</span>')}</div>
-      <div class="pr-sub">${data.length} Workouts gesamt</div>
+      <div class="pr-values">${prParts.join('<span class="pr-sep"> · </span>')}</div>
+      <div class="pr-sub">${data.length} Einträge</div>
     </div>`;
 }
 
-function renderExerciseChart(exId, viewKey, data) {
-  const el = document.getElementById(viewKey + '-chart');
+// ---- CHART ----
+function renderExerciseChart(exId, viewKey) {
+  const el   = document.getElementById(viewKey + '-chart');
   if (!el) return;
+  const data = workouts.filter(w => w.exerciseId === exId);
   if (data.length < 2) {
-    el.innerHTML = `<div class="chart-empty">Mindestens 2 Einträge für den Verlauf needed</div>`;
+    el.innerHTML = `<div class="chart-empty">Mindestens 2 Einträge für den Verlauf</div>`;
     return;
   }
-  // Build time series of best metric per session
   const points = data.slice().reverse().map(w => {
-    const s = w.sets;
+    const s = w.sets || [];
     let val = 0;
-    if (s.some(x => x.reps)) val = Math.max(...s.map(x => x.reps || 0));
+    if (s.some(x => x.reps))     val = Math.max(...s.map(x => x.reps     || 0));
     else if (s.some(x => x.duration)) val = Math.max(...s.map(x => x.duration || 0));
-    else if (s.some(x => x.weight)) val = Math.max(...s.map(x => x.weight || 0));
-    return { date: w.date.split('T')[0].slice(5), val };
+    else if (s.some(x => x.weight))   val = Math.max(...s.map(x => x.weight   || 0));
+    return { label: w.date.split('T')[0].slice(5), val };
   });
-  const svgW = Math.max(300, window.innerWidth - 52);
+
+  const svgW = Math.max(300, (window.innerWidth || 400) - 52);
   const svgH = 100;
   const maxV = Math.max(...points.map(p => p.val), 1);
-  const n = points.length;
+  const n    = points.length;
   const coords = points.map((p, i) => ({
-    x: 14 + (i / Math.max(n-1,1)) * (svgW-28),
-    y: svgH-22 - (p.val/maxV)*65,
-    val: p.val, date: p.date
+    x: 14 + (i / Math.max(n - 1, 1)) * (svgW - 28),
+    y: svgH - 22 - (p.val / maxV) * 65,
+    val: p.val, label: p.label
   }));
-  const path = coords.map((c,i) => `${i===0?'M':'L'}${c.x},${c.y}`).join(' ');
-  const dots = coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="3.5" fill="var(--accent)"><title>${c.val}</title></circle>`).join('');
-  const lastC = coords[coords.length-1];
+  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  const last = coords[coords.length - 1];
+  const dots = coords.map(c =>
+    `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="3.5" fill="var(--accent)"/>`).join('');
+  const labelStep = Math.max(1, Math.floor(n / 5));
+
   el.innerHTML = `
     <div class="card">
       <div class="card-title">VERLAUF</div>
       <div class="chart-wrap">
         <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
-          <defs><linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/>
-            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
-          </linearGradient></defs>
-          <path d="${path} L${lastC.x},${svgH-22} L${coords[0].x},${svgH-22} Z" fill="url(#lineGrad)"/>
-          <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs>
+            <linearGradient id="lg_${viewKey}" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.28"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="${path} L${last.x.toFixed(1)},${svgH-22} L${coords[0].x.toFixed(1)},${svgH-22} Z"
+                fill="url(#lg_${viewKey})"/>
+          <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round"/>
           ${dots}
-          <text x="${lastC.x}" y="${lastC.y-9}" text-anchor="middle" fill="var(--gold)" font-size="9" font-family="Inter" font-weight="700">${lastC.val}</text>
-          <line x1="14" y1="${svgH-22}" x2="${svgW-14}" y2="${svgH-22}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-          ${coords.map((c,i) => i%Math.max(1,Math.floor(n/5))===0 ? `<text x="${c.x}" y="${svgH-6}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="7" font-family="Inter">${c.date}</text>` : '').join('')}
+          <text x="${last.x.toFixed(1)}" y="${(last.y-9).toFixed(1)}" text-anchor="middle"
+                fill="var(--gold)" font-size="9" font-family="Inter" font-weight="700">${last.val}</text>
+          <line x1="14" y1="${svgH-22}" x2="${svgW-14}" y2="${svgH-22}"
+                stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+          ${coords.filter((_, i) => i % labelStep === 0).map(c =>
+            `<text x="${c.x.toFixed(1)}" y="${svgH-6}" text-anchor="middle"
+                   fill="rgba(255,255,255,0.3)" font-size="7" font-family="Inter">${c.label}</text>`).join('')}
         </svg>
       </div>
     </div>`;
 }
 
 // ============================================================
-// WORKOUT MODAL
-// ============================================================
-function openWorkoutModal(exId) {
-  modalExerciseId = exId;
-  modalSets = [];
-  modalStepperVals = {};
-  const ex = EXERCISES[exId];
-  ex.fields.forEach(f => { if (f.type === 'stepper') modalStepperVals[f.id] = f.default; });
-  document.getElementById('modalTitle').textContent = ex.name;
-  renderModalInputs();
-  renderModalSets();
-  document.getElementById('workoutModal').style.display = 'flex';
-}
-
-function closeWorkoutModal(e) {
-  if (e.target.id === 'workoutModal') closeWorkoutModalDirect();
-}
-function closeWorkoutModalDirect() {
-  document.getElementById('workoutModal').style.display = 'none';
-}
-
-function renderModalInputs() {
-  const ex = EXERCISES[modalExerciseId];
-  const container = document.getElementById('modalInputs');
-  container.innerHTML = ex.fields.map(f => {
-    if (f.type !== 'stepper') return '';
-    const val = modalStepperVals[f.id];
-    return `<div class="input-group">
-      <label class="input-label">${f.label}</label>
-      <div class="stepper">
-        <button class="stepper-btn" onclick="modalStep('${f.id}', -${f.step})">−</button>
-        <span class="stepper-val" id="msv_${f.id}">${val % 1 === 0 ? val : val.toFixed(1)}</span>
-        <span class="stepper-unit">${f.unit}</span>
-        <button class="stepper-btn" onclick="modalStep('${f.id}', ${f.step})">+</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function modalStep(fId, delta) {
-  const ex = EXERCISES[modalExerciseId];
-  const field = ex.fields.find(f => f.id === fId);
-  let val = modalStepperVals[fId] + delta;
-  val = Math.min(field.max, Math.max(field.min, val));
-  val = Math.round(val / field.step) * field.step;
-  if (field.step < 1) val = parseFloat(val.toFixed(1));
-  modalStepperVals[fId] = val;
-  const el = document.getElementById('msv_' + fId);
-  if (el) el.textContent = val % 1 === 0 ? val : val.toFixed(1);
-}
-
-function addModalSet() {
-  const ex = EXERCISES[modalExerciseId];
-  const set = { id: Date.now() };
-  ex.fields.forEach(f => { set[f.id] = modalStepperVals[f.id]; });
-  modalSets.push(set);
-  renderModalSets();
-  showToast(`Set ${modalSets.length} hinzugefügt!`);
-}
-
-function deleteModalSet(idx) {
-  modalSets.splice(idx, 1);
-  renderModalSets();
-}
-
-function renderModalSets() {
-  const ex = EXERCISES[modalExerciseId];
-  const container = document.getElementById('modalSetsContainer');
-  const thead = document.getElementById('modalSetsHeader');
-  const tbody = document.getElementById('modalSetsBody');
-  if (modalSets.length === 0) { container.style.display = 'none'; return; }
-  container.style.display = 'block';
-  thead.innerHTML = ['#', ...ex.fields.map(f => f.label.split(' ')[0]), ''].map(h => `<th>${h}</th>`).join('');
-  tbody.innerHTML = modalSets.map((set, i) => {
-    const cells = ex.fields.map(f => `<td>${set[f.id]}${f.unit ? `<small style="color:var(--t3);font-size:0.65rem"> ${f.unit}</small>` : ''}</td>`).join('');
-    return `<tr><td style="color:var(--t3)">${i+1}</td>${cells}<td><button class="delete-set-btn" onclick="deleteModalSet(${i})">✕</button></td></tr>`;
-  }).join('');
-}
-
-async function saveModalWorkout() {
-  if (modalSets.length === 0) { showToast('Füge zuerst mindestens 1 Set hinzu!'); return; }
-  const ex = EXERCISES[modalExerciseId];
-  const viewMap = { pullups: 'klimmzuege', hangboard: 'fingerboard', deadhang: 'deadhang', lsit: 'lsit' };
-  let workout = {
-    id: Date.now(),
-    date: new Date().toISOString().split('T')[0] + 'T12:00:00.000Z',
-    exerciseId: ex.id,
-    exerciseName: ex.name,
-    exerciseIcon: ex.icon,
-    sets: [...modalSets],
-    notes: ''
-  };
-  workout = await saveWorkoutToDB(workout);
-  workouts.unshift(workout);
-  saveData('cl_workouts', workouts);
-  showToast('💪 WORKOUT GESPEICHERT!');
-  closeWorkoutModalDirect();
-  const vk = viewMap[ex.id] || ex.id;
-  renderExerciseView(ex.id, vk);
-  renderCoaches();
-}
-
-// ============================================================
 // KLETTERROUTEN
 // ============================================================
-// Grade ordering for the rock wall
 const GRADE_ORDER = ['4','5a','5b','5c','6a','6a+','6b','6b+','6c','6c+','7a','7a+','7b','7b+','7c','7c+','8a','8a+','8b','8b+','8c','9a'];
 
-// Quickdraw positions on the rock (fixed layout)
 const QUICKDRAW_POSITIONS = [
-  { x: 130, y: 460 }, { x: 200, y: 445 }, { x: 85, y: 430 },
-  { x: 255, y: 415 }, { x: 160, y: 395 }, { x: 105, y: 370 },
-  { x: 225, y: 355 }, { x: 75, y: 335 }, { x: 175, y: 315 },
-  { x: 260, y: 300 }, { x: 120, y: 285 }, { x: 195, y: 265 },
-  { x: 80, y: 250 }, { x: 245, y: 235 }, { x: 155, y: 215 },
-  { x: 105, y: 195 }, { x: 215, y: 180 }, { x: 165, y: 155 },
-  { x: 130, y: 130 }, { x: 200, y: 110 }, { x: 155, y: 85 },
-  { x: 175, y: 60 }
+  { x:130,y:460 },{ x:205,y:445 },{ x:80,y:425 },
+  { x:258,y:408 },{ x:158,y:390 },{ x:100,y:368 },
+  { x:228,y:352 },{ x:72,y:330 },{ x:178,y:312 },
+  { x:262,y:295 },{ x:118,y:278 },{ x:198,y:258 },
+  { x:78,y:242 },{ x:248,y:226 },{ x:152,y:208 },
+  { x:104,y:188 },{ x:218,y:172 },{ x:168,y:148 },
+  { x:128,y:126 },{ x:202,y:106 },{ x:158,y:82 },{ x:176,y:56 }
 ];
 
-// Color ramp for ascent count
-function gradeColor(count, flash) {
-  if (flash && count === 1) return '#FFD700'; // gold flash
+function gradeColor(count, hasFlash) {
+  if (hasFlash && count === 1) return '#FFD700';
   if (count >= 10) return '#FF00FF';
-  if (count >= 7) return '#FF3399';
-  if (count >= 5) return '#FF6B35';
-  if (count >= 3) return '#FFD60A';
-  if (count >= 2) return '#30D158';
+  if (count >= 7)  return '#FF3399';
+  if (count >= 5)  return '#FF6B35';
+  if (count >= 3)  return '#FFD60A';
+  if (count >= 2)  return '#30D158';
   return '#6699CC';
 }
 
-function gradeGlow(count) {
-  if (count >= 10) return '0 0 12px rgba(255,0,255,0.8)';
-  if (count >= 7) return '0 0 10px rgba(255,51,153,0.7)';
-  if (count >= 5) return '0 0 8px rgba(255,107,53,0.6)';
-  if (count >= 3) return '0 0 6px rgba(255,214,10,0.5)';
-  return 'none';
-}
-
-function flashFillAmount(count, flashCount) {
-  // bar fill: each normal ascent = 8%, each flash = 20%, max 100%
-  const fill = Math.min(100, count * 8 + flashCount * 12);
-  return fill;
+function flashFillPct(total, flashCount) {
+  return Math.min(100, total * 8 + flashCount * 14);
 }
 
 async function addRoute() {
@@ -676,60 +655,48 @@ function renderRouteWall() {
   const g = document.getElementById('quickdrawsGroup');
   if (!g) return;
 
-  // Count per grade
-  const counts = {}; // { grade: { total, flash } }
+  const counts = {};
   routeEntries.forEach(r => {
     if (!counts[r.grade]) counts[r.grade] = { total: 0, flash: 0 };
     counts[r.grade].total++;
     if (r.flash) counts[r.grade].flash++;
   });
 
-  // Build quickdraws for each grade that has entries, placed at fixed positions
-  const gradesToShow = GRADE_ORDER.filter(g => counts[g]);
+  const gradesDone  = GRADE_ORDER.filter(gr => counts[gr]);
+  const gradesEmpty = GRADE_ORDER.filter(gr => !counts[gr]);
   let svg = '';
 
-  gradesToShow.forEach((grade, idx) => {
+  gradesDone.forEach((grade, idx) => {
     if (idx >= QUICKDRAW_POSITIONS.length) return;
-    const pos = QUICKDRAW_POSITIONS[idx];
+    const pos  = QUICKDRAW_POSITIONS[idx];
     const { total, flash } = counts[grade];
-    const color = gradeColor(total, flash > 0);
-    const fill = flashFillAmount(total, flash);
-    const barW = 44;
-    const filledW = Math.round(barW * fill / 100);
+    const col  = gradeColor(total, flash > 0);
+    const fill = flashFillPct(total, flash);
+    const bw   = 46;
+    const fw   = Math.max(2, Math.round(bw * fill / 100));
 
-    // Quickdraw SVG (two oval biners + sling)
     svg += `
-      <g transform="translate(${pos.x - 22}, ${pos.y - 28})">
-        <!-- top biner -->
-        <ellipse cx="22" cy="5" rx="7" ry="4.5" fill="none" stroke="${color}" stroke-width="2.5" opacity="0.9"/>
-        <!-- sling -->
-        <rect x="20" y="9" width="4" height="18" rx="2" fill="${color}" opacity="0.55"/>
-        <!-- bottom biner -->
-        <ellipse cx="22" cy="31" rx="7" ry="4.5" fill="none" stroke="${color}" stroke-width="2.5" opacity="0.9"/>
-        <!-- grade label bg -->
-        <rect x="0" y="38" width="${barW}" height="14" rx="4" fill="rgba(0,0,0,0.7)"/>
-        <!-- progress bar bg -->
-        <rect x="1" y="54" width="${barW-2}" height="5" rx="2.5" fill="rgba(255,255,255,0.12)"/>
-        <!-- progress bar fill -->
-        <rect x="1" y="54" width="${Math.max(2,filledW-2)}" height="5" rx="2.5" fill="${color}" opacity="0.85"/>
-        <!-- grade text -->
-        <text x="${barW/2}" y="48.5" text-anchor="middle" fill="${color}" font-size="8.5" font-family="Inter" font-weight="700" letter-spacing="0.3">${grade}</text>
-        ${total > 1 ? `<text x="${barW/2}" y="37.5" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="6.5" font-family="Inter">${total}×</text>` : ''}
-        ${flash > 0 ? `<text x="${barW-3}" y="37.5" text-anchor="end" fill="#FFD700" font-size="7" font-family="Inter">⚡</text>` : ''}
+      <g transform="translate(${pos.x - 23},${pos.y - 30})">
+        <ellipse cx="23" cy="5"  rx="7" ry="4.5" fill="none" stroke="${col}" stroke-width="2.5" opacity="0.95"/>
+        <rect    x="21"  y="9"   width="4" height="18" rx="2" fill="${col}" opacity="0.5"/>
+        <ellipse cx="23" cy="31" rx="7" ry="4.5" fill="none" stroke="${col}" stroke-width="2.5" opacity="0.95"/>
+        <rect x="0" y="38" width="${bw}" height="15" rx="4" fill="rgba(0,0,0,0.75)"/>
+        <text x="${bw/2}" y="49" text-anchor="middle" fill="${col}" font-size="9" font-family="Inter" font-weight="700">${grade}${total>1?` ×${total}`:''}</text>
+        ${flash>0 ? `<text x="${bw-2}" y="38.5" text-anchor="end" fill="#FFD700" font-size="8">⚡</text>` : ''}
+        <rect x="1" y="55" width="${bw-2}" height="5" rx="2.5" fill="rgba(255,255,255,0.1)"/>
+        <rect x="1" y="55" width="${fw}"   height="5" rx="2.5" fill="${col}" opacity="0.9"/>
       </g>`;
   });
 
-  // Unfilled quickdraws for remaining positions (faint)
-  const remaining = GRADE_ORDER.filter(g => !counts[g]).slice(0, Math.max(0, QUICKDRAW_POSITIONS.length - gradesToShow.length));
-  remaining.forEach((_, idx2) => {
-    const posIdx = gradesToShow.length + idx2;
-    if (posIdx >= QUICKDRAW_POSITIONS.length) return;
-    const pos = QUICKDRAW_POSITIONS[posIdx];
+  // ghost quickdraws for empty slots
+  gradesEmpty.slice(0, Math.max(0, QUICKDRAW_POSITIONS.length - gradesDone.length)).forEach((_, i) => {
+    const pos = QUICKDRAW_POSITIONS[gradesDone.length + i];
+    if (!pos) return;
     svg += `
-      <g transform="translate(${pos.x - 9}, ${pos.y - 20})" opacity="0.15">
-        <ellipse cx="9" cy="5" rx="7" ry="4.5" fill="none" stroke="#888" stroke-width="2"/>
-        <rect x="7" y="9" width="4" height="16" rx="2" fill="#888" opacity="0.4"/>
-        <ellipse cx="9" cy="29" rx="7" ry="4.5" fill="none" stroke="#888" stroke-width="2"/>
+      <g transform="translate(${pos.x-8},${pos.y-22})" opacity="0.12">
+        <ellipse cx="8" cy="4"  rx="6" ry="4" fill="none" stroke="#aaa" stroke-width="2"/>
+        <rect x="6"   y="8"   width="4" height="14" rx="2" fill="#aaa" opacity="0.4"/>
+        <ellipse cx="8" cy="26" rx="6" ry="4" fill="none" stroke="#aaa" stroke-width="2"/>
       </g>`;
   });
 
@@ -737,14 +704,11 @@ function renderRouteWall() {
 }
 
 // ============================================================
-// AI COACHES
+// KI COACHES
 // ============================================================
 function renderCoaches() {
   renderSleepCoach();
-  renderExerciseCoach('pullups', 'klimmzuege');
-  renderExerciseCoach('hangboard', 'fingerboard');
-  renderExerciseCoach('deadhang', 'deadhang');
-  renderExerciseCoach('lsit', 'lsit');
+  Object.keys(EXERCISES).forEach(exId => renderExerciseCoach(exId, VIEW_MAP[exId]));
 }
 
 function renderSleepCoach() {
@@ -752,73 +716,87 @@ function renderSleepCoach() {
   if (!el) return;
   const tips = getSleepTips();
   if (tips.length === 0) {
-    el.innerHTML = `<div class="coach-tip">Starte mit dem Schlaf-Tracking – dann gibt es hier personalisierte Tipps!</div>`;
+    el.innerHTML = `<div class="coach-tip-empty">Tracke deinen Schlaf – dann gibt es hier personalisierte Tipps!</div>`;
     return;
   }
-  el.innerHTML = tips.map(t => `<div class="coach-tip"><span class="coach-tip-icon">${t.icon}</span><div><strong>${t.title}</strong><div class="coach-tip-text">${t.text}</div></div></div>`).join('');
+  el.innerHTML = tips.map(t => coachTipHTML(t)).join('');
 }
 
 function getSleepTips() {
   const tips = [];
   if (sleepData.length < 2) return tips;
-  const recent = sleepData.slice(0, 7);
-  const avg = recent.reduce((a,b)=>a+b.hours,0)/recent.length;
-  const avgQ = recent.reduce((a,b)=>a+b.quality,0)/recent.length;
-  const score = Math.round((avg/8)*50+(avgQ/5)*50);
-  if (avg < 7) tips.push({ icon:'😴', title:'Mehr Schlaf!', text:`Du schläfst Ø ${avg.toFixed(1)}h – für Kletterathlet:innen sind 7.5–9h optimal. Fingersehnen regenerieren hauptsächlich nachts.` });
-  else if (avg >= 8) tips.push({ icon:'🌟', title:'Exzellente Schlafbasis!', text:`${avg.toFixed(1)}h Ø-Schlaf ist top! Nutze diese Energie für intensive Hangboard- oder Klimmzugeinheiten.` });
-  if (avgQ <= 2.5) tips.push({ icon:'🌿', title:'Schlafqualität verbessern', text:'Kein Bildschirm 1h vor dem Schlafen, Zimmer auf 16–18°C halten, kein Training 3h vor dem Einschlafen.' });
-  if (score >= 80) tips.push({ icon:'💪', title:'Perfekter Trainingstag heute!', text:'Mit deinem aktuellen Schlaf-Score bist du optimal erholt. Heute ideal für ein Max-Effort-Workout!' });
+  const recent   = sleepData.slice(0, 7);
+  const avg      = recent.reduce((a, b) => a + b.hours, 0) / recent.length;
+  const avgQ     = recent.reduce((a, b) => a + b.quality, 0) / recent.length;
+  const score    = Math.round((avg / 8) * 50 + (avgQ / 5) * 50);
+  if (avg < 7)
+    tips.push({ icon:'😴', title:'Mehr Schlaf!', text:`Ø ${avg.toFixed(1)}h – Kletterathlet:innen brauchen 7.5–9h. Fingersehnen regenerieren hauptsächlich im Schlaf.` });
+  else if (avg >= 8)
+    tips.push({ icon:'🌟', title:'Exzellente Basis!', text:`${avg.toFixed(1)}h Ø-Schlaf – top! Nutze diese Energie für intensive Trainingseinheiten.` });
+  if (avgQ <= 2.5)
+    tips.push({ icon:'🌿', title:'Qualität verbessern', text:'Kein Bildschirm 1h vor dem Schlafen, Zimmer 16–18°C, kein Training 3h vor dem Einschlafen.' });
+  if (score >= 80)
+    tips.push({ icon:'💪', title:'Perfekter Trainingstag!', text:'Dein Score ist stark – heute ideal für ein Max-Effort Workout.' });
   return tips;
 }
 
 function renderExerciseCoach(exId, viewKey) {
   const el = document.getElementById(viewKey + '-coach');
   if (!el) return;
-  const data = workouts.filter(w => w.exerciseId === exId);
-  const tips = getExerciseTips(exId, data);
+  const tips = getExerciseTips(exId);
   if (tips.length === 0) {
-    el.innerHTML = `<div class="coach-tip">Logge mehr Workouts – dann erscheinen hier personalisierte Tipps!</div>`;
+    el.innerHTML = `<div class="coach-tip-empty">Logge mehr Einträge für personalisierte Tipps!</div>`;
     return;
   }
-  el.innerHTML = tips.map(t => `<div class="coach-tip"><span class="coach-tip-icon">${t.icon}</span><div><strong>${t.title}</strong><div class="coach-tip-text">${t.text}</div></div></div>`).join('');
+  el.innerHTML = tips.map(t => coachTipHTML(t)).join('');
 }
 
-function getExerciseTips(exId, data) {
+function coachTipHTML(t) {
+  return `<div class="coach-tip">
+    <span class="coach-tip-icon">${t.icon}</span>
+    <div><strong>${t.title}</strong><div class="coach-tip-text">${t.text}</div></div>
+  </div>`;
+}
+
+function getExerciseTips(exId) {
   const tips = [];
+  const data = workouts.filter(w => w.exerciseId === exId);
   if (data.length < 2) return tips;
-  const allSets = data.flatMap(w => w.sets);
-  const recent7 = data.filter(w => {
-    const diff = (Date.now() - new Date(w.date)) / 86400000;
-    return diff <= 7;
-  });
+  const allSets = data.flatMap(w => w.sets || []);
+  const recent7 = data.filter(w => (Date.now() - new Date(w.date)) / 86400000 <= 7);
 
   if (exId === 'pullups') {
-    const maxReps = Math.max(...allSets.map(s => s.reps || 0));
-    if (maxReps >= 15) tips.push({ icon:'⚖️', title:'Zeit für Zusatzgewicht!', text:`${maxReps} Reps – du bist bereit für gewichtete Klimmzüge. Starte mit +5kg für 5 Reps, steigere alle 2 Wochen.` });
-    else if (maxReps < 5) tips.push({ icon:'🎯', title:'Aufbauphase', text:'Fokus auf negative Klimmzüge und Bänder-Unterstützung. 3–5 Sets täglich bringt dich schnell zu deinen ersten sauberen Reps.' });
+    const maxReps = Math.max(...allSets.map(s => s.reps || 0), 0);
+    if (maxReps >= 15)
+      tips.push({ icon:'⚖️', title:'Zeit für Gewicht!', text:`${maxReps} Reps – starte mit +5kg für 5 saubere Reps.` });
+    else if (maxReps < 5)
+      tips.push({ icon:'🎯', title:'Aufbauphase', text:'Fokus auf negative Klimmzüge und 3–5 Sets täglich.' });
+    else
+      tips.push({ icon:'📈', title:'Gut dabei!', text:`Max. ${maxReps} Reps – steigere schrittweise um 1–2 Reps pro Woche.` });
   }
   if (exId === 'hangboard') {
-    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
-    if (maxDur >= 20) tips.push({ icon:'🏋️', title:'Zusatzgewicht hinzufügen', text:`${maxDur}s ist stark! Versuche schrittweise Gewicht hinzuzufügen – auch +2.5kg trainiert die Griffkraft intensiv.` });
-    else tips.push({ icon:'🪨', title:'Fingerboard Grundsatz', text:'7–10sek Hängen auf 20mm Leiste mit Pause ist effektiver als langes Hängen. Priorität: Qualität der Griffposition.' });
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0), 0);
+    if (maxDur >= 20)
+      tips.push({ icon:'🏋️', title:'Gewicht hinzufügen', text:`${maxDur}s – versuche schrittweise +2.5kg.` });
+    else
+      tips.push({ icon:'🪨', title:'Fingerboard Grundsatz', text:'7–10sek auf 20mm Leiste mit Pause. Qualität vor Quantität.' });
   }
   if (exId === 'deadhang') {
-    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
-    tips.push({ icon:'⏱️', title:'Dead Hang Ziel', text:`Dein Rekord: ${maxDur}s. Das Pro-Ziel: 60s mit Körpergewicht, 30s mit 50% Körpergewicht als Zusatz.` });
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0), 0);
+    tips.push({ icon:'⏱️', title:'Dead Hang Ziel', text:`Dein Rekord: ${maxDur}s. Pro-Ziel: 60s mit Körpergewicht.` });
   }
   if (exId === 'lsit') {
-    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
-    if (maxDur < 10) tips.push({ icon:'💡', title:'L-Sit Aufbau', text:'Starte mit Tuck L-Sit (Knie angezogen). Ziel: 10s gehaltener L-Sit – das stärkt Rumpf und Schultern enorm fürs Klettern.' });
-    else tips.push({ icon:'🔥', title:`Starker Kern – ${maxDur}s!`, text:'Versuche L-Sit auf Ringen für mehr Schulteraktivierung. Das verbessert direkt deine Zugkraft am Fels.' });
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0), 0);
+    if (maxDur < 10)
+      tips.push({ icon:'💡', title:'L-Sit Aufbau', text:'Starte mit Tuck-L-Sit (Knie angezogen). Ziel: 10s gehalten.' });
+    else
+      tips.push({ icon:'🔥', title:`Starker Kern – ${maxDur}s!`, text:'Versuche L-Sit auf Ringen für mehr Schulteraktivierung.' });
   }
 
-  // Frequency check
-  if (recent7.length >= 4) {
-    tips.push({ icon:'⚠️', title:'Erholung nicht vergessen', text:'Viele Einheiten diese Woche – plane morgen einen Ruhetag ein. Sehnen brauchen 48–72h Regeneration.' });
-  } else if (recent7.length === 0 && data.length > 0) {
-    tips.push({ icon:'🔥', title:'Zurück ans Training!', text:'Diese Woche noch nichts geloggt. Selbst 15 Minuten halten die Kraft aufrecht.' });
-  }
+  if (recent7.length >= 4)
+    tips.push({ icon:'⚠️', title:'Erholung!', text:'Viele Einheiten diese Woche – plane 1–2 Ruhetage ein.' });
+  else if (recent7.length === 0 && data.length > 0)
+    tips.push({ icon:'🔥', title:'Zurück ans Training!', text:'Diese Woche noch nichts – selbst 15 Min halten die Kraft.' });
 
   return tips;
 }
@@ -826,16 +804,14 @@ function getExerciseTips(exId, data) {
 // ============================================================
 // TOAST
 // ============================================================
-function showToast(msg, duration = 2000) {
+function showToast(msg, duration = 2200) {
   const toast = document.getElementById('toast');
   toast.textContent = msg;
   toast.style.display = 'block';
-  setTimeout(() => { toast.style.display = 'none'; }, duration);
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toast.style.display = 'none'; }, duration);
 }
 
 // PWA
 let deferredPrompt;
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault();
-  deferredPrompt = e;
-});
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; });
