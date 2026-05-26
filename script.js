@@ -79,11 +79,7 @@ async function handleGoogleAuth() {
 async function handleLogout() {
   hideUserMenu();
   await db.auth.signOut();
-  workouts = [];
-  sleepData = [];
-  currentUser = null;
-  document.getElementById('appScreen').style.display = 'none';
-  document.getElementById('authScreen').style.display = 'flex';
+  // onAuthStateChange SIGNED_OUT handles the rest
 }
 
 function showUserMenu() {
@@ -332,35 +328,36 @@ let workoutDate = new Date().toISOString().split('T')[0]; // selected workout da
 // INIT
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-  // Listen for auth state changes
+  // Init nav ONCE on load, not inside auth callback
+  initNav();
+
+  // Auth state listener
   db.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_OUT' || !session?.user) {
+      currentUser = null;
+      workouts = [];
+      sleepData = [];
+      document.getElementById('appScreen').style.display = 'none';
+      document.getElementById('authScreen').style.display = 'flex';
+      document.getElementById('authBtn').dataset.mode = 'login';
+      setSyncing(false);
+      return;
+    }
+
     if (session?.user) {
       currentUser = session.user;
       document.getElementById('authScreen').style.display = 'none';
       document.getElementById('appScreen').style.display = 'block';
       document.getElementById('userMenuEmail').textContent = currentUser.email || 'Eingeloggt';
 
-      // Set date display
       renderWorkoutDateDisplay();
       document.getElementById('sleepDate').value = workoutDate;
 
-      // Init nav
-      initNav();
-
-      // Register service worker
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js').catch(() => {});
       }
 
-      // Load data from Supabase
       await loadFromDB();
-
-    } else {
-      currentUser = null;
-      document.getElementById('appScreen').style.display = 'none';
-      document.getElementById('authScreen').style.display = 'flex';
-      // Set default auth mode
-      document.getElementById('authBtn').dataset.mode = 'login';
     }
   });
 });

@@ -1,22 +1,14 @@
-// CrimpLog Service Worker – v1
-const CACHE_NAME = 'crimplog-v1';
-const ASSETS = [
-  './',
-  './index.html',
-  './script.js',
-  './style.css',
-  './manifest.json'
-];
+// CrimpLog Service Worker – v3 (network-first for HTML)
+const CACHE_NAME = 'crimplog-v3';
+const STATIC = ['./style.css', './script.js', './manifest.json'];
 
-// Install: cache all assets
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC))
   );
   self.skipWaiting();
 });
 
-// Activate: remove old caches
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
@@ -26,17 +18,26 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// Fetch: cache-first strategy (works offline)
 self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+
+  // Always network-first for HTML and Supabase API calls
+  if (event.request.mode === 'navigate' || url.hostname.includes('supabase.co')) {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // Cache-first for static assets
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
       return fetch(event.request).then(response => {
-        // Cache new resources on the fly
         const clone = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         return response;
-      }).catch(() => caches.match('./index.html'));
+      });
     })
   );
 });
