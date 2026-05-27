@@ -389,3 +389,34 @@ select.input-field { background-image: url("data:image/svg+xml,%3Csvg xmlns='htt
 .coach-tip-empty {
   font-size: 0.8rem; color: var(--t3); padding: 6px 0;
 }
+
+/* ===================== DATE ROW (workout forms) ===================== */
+.date-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+}
+.date-row-label {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg4); border-radius: var(--radius-sm);
+  padding: 8px 12px; flex: 1; cursor: pointer;
+  position: relative; overflow: hidden;
+}
+.date-row-icon { font-size: 1rem; flex-shrink: 0; }
+.date-row-text {
+  font-size: 0.88rem; font-weight: 600; color: var(--t1);
+  flex: 1;
+}
+.date-input-hidden {
+  position: absolute; inset: 0; opacity: 0;
+  cursor: pointer; width: 100%; height: 100%;
+  border: none; background: none;
+}
+.today-pill {
+  background: var(--accent-bg); color: var(--accent);
+  border: 1px solid rgba(255,107,53,0.3);
+  border-radius: 20px; padding: 6px 12px;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.5px;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  font-family: var(--font);
+}
+.today-pill:active { opacity: 0.7; }
