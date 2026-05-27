@@ -366,12 +366,10 @@ function renderExerciseForm(exId, viewKey) {
     <div class="card inline-form-card">
       ${fieldHTML}
       <div class="date-row">
-        <label class="date-row-label">
-          <span class="date-row-icon">📅</span>
-          <span id="dateLabel_${exId}" class="date-row-text">${formatDateLabel(date)}</span>
-          <input type="date" class="date-input-hidden" value="${date}" max="${today}"
-            onchange="setViewDate('${exId}', this.value)">
-        </label>
+        <input type="date" class="date-input-visible"
+          id="datePicker_${exId}"
+          value="${date}" max="${today}"
+          onchange="setViewDate('${exId}', this.value)">
         ${date !== today ? `<button class="today-pill" onclick="setViewDate('${exId}','${today}')">HEUTE</button>` : ''}
       </div>
       <button class="btn btn-primary add-entry-btn" onclick="addEntry('${exId}')">
@@ -393,10 +391,28 @@ function formatDateLabel(dateStr) {
 }
 
 function setViewDate(exId, val) {
+  if (!val) return;
   viewDates[exId] = val;
-  const vk = VIEW_MAP[exId];
-  // re-render just the form to update label + today button
-  renderExerciseForm(exId, vk);
+  // Sync the picker input value (called from HEUTE button)
+  const picker = document.getElementById('datePicker_' + exId);
+  if (picker && picker.value !== val) picker.value = val;
+  // Toggle HEUTE pill without re-rendering (re-render closes iOS picker)
+  const today = new Date().toISOString().split('T')[0];
+  const row = picker ? picker.closest('.date-row') : null;
+  if (row) {
+    let pill = row.querySelector('.today-pill');
+    if (val !== today) {
+      if (!pill) {
+        pill = document.createElement('button');
+        pill.className = 'today-pill';
+        pill.textContent = 'HEUTE';
+        pill.onclick = () => setViewDate(exId, today);
+        row.appendChild(pill);
+      }
+    } else {
+      if (pill) pill.remove();
+    }
+  }
 }
 
 function viewStep(exId, fId, delta) {
