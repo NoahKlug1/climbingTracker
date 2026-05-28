@@ -66,7 +66,8 @@ body { background: var(--bg); color: var(--t1); font-family: var(--font); min-he
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-top: 1px solid var(--sep);
-  padding-bottom: var(--safe-bottom);
+  /* iOS PWA: env() alone can be 0 if viewport-fit=cover not active */
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
 }
 .nav-tab {
   flex: 1; padding: 8px 2px 6px;
@@ -81,7 +82,7 @@ body { background: var(--bg); color: var(--t1); font-family: var(--font); min-he
 .nav-tab:active { opacity: 0.6; }
 
 /* ===================== VIEWS ===================== */
-.view { display: none; padding: 16px; padding-bottom: calc(var(--safe-bottom) + 88px); }
+.view { display: none; padding: 16px; padding-bottom: calc(max(env(safe-area-inset-bottom, 0px), 8px) + 80px); }
 .view.active { display: block; }
 
 /* ===================== SECTION TITLES ===================== */
@@ -273,7 +274,7 @@ select.input-field { background-image: url("data:image/svg+xml,%3Csvg xmlns='htt
 /* ===================== TOAST ===================== */
 .toast {
   position: fixed;
-  bottom: calc(var(--safe-bottom) + 90px); left: 50%;
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), 8px) + 80px); left: 50%;
   transform: translateX(-50%);
   background: rgba(44,44,46,0.95);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
