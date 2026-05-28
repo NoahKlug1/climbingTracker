@@ -39,7 +39,7 @@ const EXERCISES = {
     id: 'pullups', name: 'KLIMMZÜGE', icon: '🧗',
     fields: [
       { id:'reps',   label:'Wiederholungen',    type:'stepper', min:1,  max:50,   step:1,   default:8,  unit:'reps' },
-      { id:'weight', label:'Zusatzgewicht (kg)', type:'stepper', min:0,  max:9999, step:2.5, default:0,  unit:'kg'  }
+      { id:'weight', label:'Zusatzgewicht (kg)', type:'stepper', min:-100,  max:9999, step:2.5, default:0,  unit:'kg'  }
     ]
   },
   hangboard: {
@@ -47,7 +47,7 @@ const EXERCISES = {
     fields: [
       { id:'duration', label:'Haltedauer (Sek.)', type:'stepper', min:1, max:120,  step:1,   default:10, unit:'sek'   },
       { id:'sets',     label:'Sätze',             type:'stepper', min:1, max:20,   step:1,   default:6,  unit:'sätze' },
-      { id:'weight',   label:'Zusatzgew. (kg)',   type:'stepper', min:0, max:9999, step:2.5, default:0,  unit:'kg'   }
+      { id:'weight',   label:'Zusatzgew. (kg)',   type:'stepper', min:-100, max:9999, step:2.5, default:0,  unit:'kg'   }
     ]
   },
   deadhang: {
