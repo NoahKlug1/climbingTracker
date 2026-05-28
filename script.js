@@ -30,6 +30,7 @@ function saveData(key, data) {
 let workouts     = loadData('cl_workouts', []);
 let sleepData    = loadData('cl_sleep',    []);
 let routeEntries = loadData('cl_routes',   []);
+let bodyweight   = loadData('cl_bodyweight', 0);  // kg
 
 // ============================================================
 // EXERCISES CONFIG
@@ -39,7 +40,7 @@ const EXERCISES = {
     id: 'pullups', name: 'KLIMMZÜGE', icon: '🧗',
     fields: [
       { id:'reps',   label:'Wiederholungen',    type:'stepper', min:1,  max:50,   step:1,   default:8,  unit:'reps' },
-      { id:'weight', label:'Zusatzgewicht (kg)', type:'stepper', min:-100,  max:9999, step:2.5, default:0,  unit:'kg'  }
+      { id:'weight', label:'Zusatzgewicht (kg)', type:'stepper', min:0,  max:9999, step:2.5, default:0,  unit:'kg'  }
     ]
   },
   hangboard: {
@@ -47,7 +48,7 @@ const EXERCISES = {
     fields: [
       { id:'duration', label:'Haltedauer (Sek.)', type:'stepper', min:1, max:120,  step:1,   default:10, unit:'sek'   },
       { id:'sets',     label:'Sätze',             type:'stepper', min:1, max:20,   step:1,   default:6,  unit:'sätze' },
-      { id:'weight',   label:'Zusatzgew. (kg)',   type:'stepper', min:-100, max:9999, step:2.5, default:0,  unit:'kg'   }
+      { id:'weight',   label:'Zusatzgew. (kg)',   type:'stepper', min:0, max:9999, step:2.5, default:0,  unit:'kg'   }
     ]
   },
   deadhang: {
@@ -148,6 +149,8 @@ function showApp(user) {
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('appScreen').style.display  = 'block';
   document.getElementById('userMenuEmail').textContent = user.email || 'Eingeloggt';
+  const bwEl = document.getElementById('bwInput');
+  if (bwEl) bwEl.value = bodyweight || '';
   // Always render local data immediately so the UI is never blank
   renderAll();
 }
@@ -197,6 +200,15 @@ async function loadFromDB() {
         hrv: r.hrv, notes: r.notes || ''
       }));
       saveData('cl_sleep', sleepData);
+    }
+
+    // bodyweight / profile
+    const pRes = await db.from('profiles').select('bodyweight').eq('user_id', currentUser.id).single();
+    if (!pRes.error && pRes.data?.bodyweight) {
+      bodyweight = pRes.data.bodyweight;
+      saveData('cl_bodyweight', bodyweight);
+      const bwEl = document.getElementById('bwInput');
+      if (bwEl) bwEl.value = bodyweight;
     }
 
     // routes
@@ -262,6 +274,25 @@ async function saveRouteToDB(entry) {
     }
     return { ...entry, id: data.id, date: data.created_at };
   } finally { setSyncing(false); }
+}
+
+async function saveBodyweight(kg) {
+  if (!currentUser) return;
+  const val = parseFloat(kg);
+  if (isNaN(val) || val <= 0) return;
+  bodyweight = val;
+  saveData('cl_bodyweight', val);
+  setSyncing(true);
+  // upsert into profiles table
+  const { error } = await db.from('profiles').upsert({
+    user_id:    currentUser.id,
+    bodyweight: val
+  }, { onConflict: 'user_id' });
+  setSyncing(false);
+  if (error) showToast('⚠️ Körpergewicht-Fehler: ' + error.message);
+  else showToast('✅ Körpergewicht gespeichert!');
+  // re-render charts since bodyweight affects total-load calculation
+  Object.entries(VIEW_MAP).forEach(([exId, vk]) => renderExerciseChart(exId, vk));
 }
 
 function setSyncing(active) {
@@ -439,65 +470,159 @@ function renderExercisePR(exId, viewKey) {
   const data = workouts.filter(w => w.exerciseId === exId);
   if (data.length === 0) { el.innerHTML = `<div class="pr-empty">Noch kein Eintrag – leg los! 🏆</div>`; return; }
   const allSets = data.flatMap(w => w.sets || []);
-  let parts = [];
-  if (allSets.some(s => s.reps     > 0)) parts.push(`<span class="pr-val">${Math.max(...allSets.map(s=>s.reps||0))}</span><span class="pr-unit"> reps</span>`);
-  if (allSets.some(s => s.duration > 0)) parts.push(`<span class="pr-val">${Math.max(...allSets.map(s=>s.duration||0))}</span><span class="pr-unit"> sek</span>`);
-  if (allSets.some(s => s.weight   > 0)) parts.push(`<span class="pr-val">${Math.max(...allSets.map(s=>s.weight||0))}</span><span class="pr-unit"> kg</span>`);
+  let html = '';
+
+  if (exId === 'pullups') {
+    // Best set = highest total load (reps × (bodyweight + extraweight))
+    // Show: reps @ +Xkg  or just reps if no extra weight
+    const bw = bodyweight || 75;
+    let bestSet = null, bestLoad = 0;
+    allSets.forEach(s => {
+      const load = (s.reps || 0) * (bw + (s.weight || 0));
+      if (load > bestLoad) { bestLoad = load; bestSet = s; }
+    });
+    if (bestSet) {
+      html = `<span class="pr-val">${bestSet.reps}</span><span class="pr-unit"> reps</span>`;
+      if (bestSet.weight > 0) html += `<span class="pr-sep"> @ </span><span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
+      html += `<div class="pr-total-load">${bestLoad.toFixed(0)} kg Gesamtlast</div>`;
+    }
+  } else if (exId === 'hangboard') {
+    // Best set = highest total load (duration × (bodyweight + extraweight))
+    const bw = bodyweight || 75;
+    let bestSet = null, bestLoad = 0;
+    allSets.forEach(s => {
+      const load = (s.duration || 0) * (bw + (s.weight || 0));
+      if (load > bestLoad) { bestLoad = load; bestSet = s; }
+    });
+    if (bestSet) {
+      html = `<span class="pr-val">${bestSet.duration}</span><span class="pr-unit"> sek</span>`;
+      if (bestSet.weight > 0) html += `<span class="pr-sep"> @ </span><span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
+    }
+  } else if (exId === 'deadhang') {
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
+    html = `<span class="pr-val">${maxDur}</span><span class="pr-unit"> sek</span>`;
+  } else if (exId === 'lsit') {
+    const maxDur = Math.max(...allSets.map(s => s.duration || 0));
+    const maxSets = Math.max(...allSets.map(s => s.sets || 0));
+    html = `<span class="pr-val">${maxDur}</span><span class="pr-unit"> sek</span>`;
+    if (maxSets > 0) html += `<span class="pr-sep"> · </span><span class="pr-val">${maxSets}</span><span class="pr-unit"> sätze</span>`;
+  }
+
   el.innerHTML = `
     <div class="card pr-card">
       <div class="pr-label">🏆 BESTLEISTUNG</div>
-      <div class="pr-values">${parts.join('<span class="pr-sep"> · </span>')}</div>
-      <div class="pr-sub">${data.length} Einträge</div>
+      <div class="pr-values">${html}</div>
+      <div class="pr-sub">${data.length} Einträge${bodyweight ? '' : ' · Körpergewicht nicht gesetzt'}</div>
     </div>`;
 }
 
 // ---- CHART ----
+// Bar chart: x = date, bar height = total load for that day, split segments per entry
 function renderExerciseChart(exId, viewKey) {
-  const el   = document.getElementById(viewKey + '-chart');
+  const el = document.getElementById(viewKey + '-chart');
   if (!el) return;
-  const data = workouts.filter(w => w.exerciseId === exId);
-  if (data.length < 2) { el.innerHTML = `<div class="chart-empty">Mindestens 2 Einträge für den Verlauf</div>`; return; }
+  const raw = workouts.filter(w => w.exerciseId === exId);
+  if (raw.length < 1) { el.innerHTML = `<div class="chart-empty">Mindestens 1 Eintrag für den Verlauf</div>`; return; }
 
-  const points = data.slice().reverse().map(w => {
+  // Sort chronologically (oldest first)
+  const sorted = raw.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // Group by day-string (YYYY-MM-DD)
+  const byDay = {};
+  sorted.forEach(w => {
+    const day = w.date.split('T')[0];
+    if (!byDay[day]) byDay[day] = [];
+    byDay[day].push(w);
+  });
+  const days = Object.keys(byDay).sort();
+  const bw   = bodyweight || 75;
+
+  // Compute per-day total-load and per-entry segment values
+  // For pullups/hangboard: total load = sum of reps*(bw+weight) or duration*(bw+weight)
+  // For deadhang/lsit:     total = max duration (visual: sum of all set durations)
+  function entryLoad(w) {
     const s = w.sets || [];
-    let val = 0;
-    if      (s.some(x => x.reps))     val = Math.max(...s.map(x => x.reps     || 0));
-    else if (s.some(x => x.duration)) val = Math.max(...s.map(x => x.duration || 0));
-    else if (s.some(x => x.weight))   val = Math.max(...s.map(x => x.weight   || 0));
-    return { label: w.date.split('T')[0].slice(5), val };
+    if (exId === 'pullups')   return s.reduce((acc, x) => acc + (x.reps||0)*(bw+(x.weight||0)), 0);
+    if (exId === 'hangboard') return s.reduce((acc, x) => acc + (x.duration||0)*(bw+(x.weight||0)), 0);
+    if (exId === 'deadhang')  return s.reduce((acc, x) => acc + (x.duration||0), 0);
+    if (exId === 'lsit')      return s.reduce((acc, x) => acc + (x.duration||0)*(x.sets||1), 0);
+    return 0;
+  }
+
+  const dayLoads = days.map(day => ({
+    day,
+    label: day.slice(5),
+    entries: byDay[day],
+    loads:   byDay[day].map(entryLoad),
+    total:   byDay[day].map(entryLoad).reduce((a,b)=>a+b,0)
+  }));
+
+  const maxLoad = Math.max(...dayLoads.map(d => d.total), 1);
+  const svgW    = Math.max(300, (window.innerWidth || 400) - 52);
+  const svgH    = 130;
+  const barArea = svgH - 28;    // usable height for bars
+  const n       = dayLoads.length;
+  const barW    = Math.max(18, Math.min(44, Math.floor((svgW - 20) / n) - 4));
+  const gap     = Math.max(4, Math.floor((svgW - 20 - n * barW) / Math.max(n - 1, 1)));
+  const startX  = Math.floor((svgW - (n * barW + (n-1)*gap)) / 2);
+
+  // Segment colour palette (per entry within a day)
+  const SEG_COLS = ['#FF6B35','#FFD60A','#30D158','#0A84FF','#BF5AF2'];
+
+  let bars = '';
+  dayLoads.forEach((d, i) => {
+    const x        = startX + i * (barW + gap);
+    const totalBarH= Math.max(3, Math.round((d.total / maxLoad) * (barArea - 14)));
+    const baseY    = svgH - 18;
+    let curY       = baseY;
+
+    // Draw stacked segments bottom-up
+    d.loads.forEach((load, si) => {
+      if (load <= 0) return;
+      const segH = Math.max(2, Math.round((load / d.total) * totalBarH));
+      const col  = SEG_COLS[si % SEG_COLS.length];
+      const sy   = curY - segH;
+      // tiny gap between segments
+      const gap2 = si > 0 ? 1 : 0;
+      bars += `<rect x="${x}" y="${sy + gap2}" width="${barW}" height="${Math.max(1,segH-gap2)}" rx="${si===0?'3 3 0 0':'0'}" fill="${col}" opacity="0.88"/>`;
+      // label inside segment if tall enough
+      const s = (d.entries[si].sets||[])[0] || {};
+      let lbl = '';
+      if (exId==='pullups')   lbl = s.reps ? `${s.reps}r${s.weight?'+'+s.weight:''}` : '';
+      if (exId==='hangboard') lbl = s.duration ? `${s.duration}s${s.weight?'+'+s.weight:''}` : '';
+      if (exId==='deadhang')  lbl = s.duration ? `${s.duration}s` : '';
+      if (exId==='lsit')      lbl = s.duration ? `${s.duration}s` : '';
+      if (lbl && segH >= 14) {
+        bars += `<text x="${x+barW/2}" y="${sy+segH/2+gap2+3.5}" text-anchor="middle" fill="rgba(0,0,0,0.75)" font-size="7" font-family="Inter" font-weight="700">${lbl}</text>`;
+      }
+      curY -= segH;
+    });
+
+    // Total value above bar
+    const dispVal = exId==='pullups'||exId==='hangboard'
+      ? (d.total >= 1000 ? (d.total/1000).toFixed(1)+'t' : Math.round(d.total)+'kg')
+      : Math.round(d.total)+'s';
+    bars += `<text x="${x+barW/2}" y="${baseY-totalBarH-4}" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="7.5" font-family="Inter" font-weight="600">${dispVal}</text>`;
+
+    // Date label below
+    if (n <= 14 || i % Math.max(1,Math.floor(n/7)) === 0) {
+      bars += `<text x="${x+barW/2}" y="${svgH-4}" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="7" font-family="Inter">${d.label}</text>`;
+    }
   });
 
-  const svgW   = Math.max(300, (window.innerWidth || 400) - 52);
-  const svgH   = 100;
-  const maxV   = Math.max(...points.map(p => p.val), 1);
-  const n      = points.length;
-  const coords = points.map((p, i) => ({
-    x: 14 + (i / Math.max(n - 1, 1)) * (svgW - 28),
-    y: svgH - 22 - (p.val / maxV) * 65, val: p.val, label: p.label
-  }));
-  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-  const last  = coords[coords.length - 1];
-  const dots  = coords.map(c => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="3.5" fill="var(--accent)"/>`).join('');
-  const lblStep = Math.max(1, Math.floor(n / 5));
+  // Unit label
+  const unitLabel = exId==='pullups'||exId==='hangboard' ? 'Gesamtlast (kg)' : 'Gesamtzeit (sek)';
 
   el.innerHTML = `
     <div class="card">
-      <div class="card-title">VERLAUF</div>
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>VERLAUF</span>
+        <span style="font-size:0.62rem;color:var(--t3);font-weight:400;">${unitLabel}</span>
+      </div>
       <div class="chart-wrap">
-        <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
-          <defs><linearGradient id="lg_${viewKey}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stop-color="var(--accent)" stop-opacity="0.28"/>
-            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
-          </linearGradient></defs>
-          <path d="${path} L${last.x.toFixed(1)},${svgH-22} L${coords[0].x.toFixed(1)},${svgH-22} Z" fill="url(#lg_${viewKey})"/>
-          <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          ${dots}
-          <text x="${last.x.toFixed(1)}" y="${(last.y-9).toFixed(1)}" text-anchor="middle"
-                fill="var(--gold)" font-size="9" font-family="Inter" font-weight="700">${last.val}</text>
-          <line x1="14" y1="${svgH-22}" x2="${svgW-14}" y2="${svgH-22}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-          ${coords.filter((_,i) => i % lblStep === 0).map(c =>
-            `<text x="${c.x.toFixed(1)}" y="${svgH-6}" text-anchor="middle"
-                   fill="rgba(255,255,255,0.3)" font-size="7" font-family="Inter">${c.label}</text>`).join('')}
+        <svg width="${Math.max(n*(barW+gap)+40,svgW)}" height="${svgH}" viewBox="0 0 ${Math.max(n*(barW+gap)+40,svgW)} ${svgH}">
+          <line x1="10" y1="${svgH-18}" x2="${Math.max(n*(barW+gap)+40,svgW)-10}" y2="${svgH-18}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+          ${bars}
         </svg>
       </div>
     </div>`;
@@ -619,7 +744,7 @@ function renderSleepChart(data) {
 // ============================================================
 // KLETTERROUTEN
 // ============================================================
-const GRADE_ORDER = ['9a','8c','8b+','8b','8a+','8a','7c+','7c','7b+','7b','7a+','7a','6c+','6c','6b+','6b','6a+','6a','5c','5b','5a','4'];
+const GRADE_ORDER = ['4','5a','5b','5c','6a','6a+','6b','6b+','6c','6c+','7a','7a+','7b','7b+','7c','7c+','8a','8a+','8b','8b+','8c','9a'];
 const QD_POSITIONS = [
   {x:130,y:460},{x:205,y:445},{x:80,y:425},{x:258,y:408},{x:158,y:390},
   {x:100,y:368},{x:228,y:352},{x:72,y:330},{x:178,y:312},{x:262,y:295},
