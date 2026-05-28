@@ -653,22 +653,42 @@ async function addRoute() {
 function renderRouteWall() {
   const g = document.getElementById('quickdrawsGroup');
   if (!g) return;
+
+  // Count climbed routes per grade
   const counts = {};
   routeEntries.forEach(r => {
     if (!counts[r.grade]) counts[r.grade] = { total:0, flash:0 };
     counts[r.grade].total++;
     if (r.flash) counts[r.grade].flash++;
   });
-  const done  = GRADE_ORDER.filter(gr => counts[gr]);
-  const empty = GRADE_ORDER.filter(gr => !counts[gr]);
+
+  // GRADE_ORDER[0]='4' (easiest) … GRADE_ORDER[21]='9a' (hardest)
+  // QD_POSITIONS[0] = topmost position (y=56), QD_POSITIONS[21] = bottom (y=460)
+  // So: gradeIndex 0 → positionIndex 21, gradeIndex 21 → positionIndex 0
+  // i.e. positionIndex = (GRADE_ORDER.length - 1) - gradeIndex
+  const maxIdx = GRADE_ORDER.length - 1;
   let svg = '';
 
-  done.forEach((grade, idx) => {
-    if (idx >= QD_POSITIONS.length) return;
-    const pos = QD_POSITIONS[idx];
-    const { total, flash } = counts[grade];
-    const col = gradeColor(total, flash>0);
-    const bw  = 46, fw = Math.max(2, Math.round(bw * Math.min(100, total*8+flash*14) / 100));
+  GRADE_ORDER.forEach((grade, gradeIdx) => {
+    const posIdx = maxIdx - gradeIdx; // invert: hardest at top
+    const pos    = QD_POSITIONS[posIdx];
+    if (!pos) return;
+
+    const info = counts[grade];
+    if (!info) {
+      // Grade not yet climbed – ghost quickdraw
+      svg += `<g transform="translate(${pos.x-8},${pos.y-22})" opacity=".12">
+        <ellipse cx="8" cy="4"  rx="6" ry="4" fill="none" stroke="#aaa" stroke-width="2"/>
+        <rect x="6" y="8" width="4" height="14" rx="2" fill="#aaa" opacity=".4"/>
+        <ellipse cx="8" cy="26" rx="6" ry="4" fill="none" stroke="#aaa" stroke-width="2"/>
+      </g>`;
+      return;
+    }
+
+    const { total, flash } = info;
+    const col = gradeColor(total, flash > 0);
+    const bw  = 46;
+    const fw  = Math.max(2, Math.round(bw * Math.min(100, total * 8 + flash * 14) / 100));
     svg += `
       <g transform="translate(${pos.x-23},${pos.y-30})">
         <ellipse cx="23" cy="5"  rx="7" ry="4.5" fill="none" stroke="${col}" stroke-width="2.5" opacity=".95"/>
@@ -682,15 +702,6 @@ function renderRouteWall() {
       </g>`;
   });
 
-  empty.slice(0, Math.max(0, QD_POSITIONS.length - done.length)).forEach((_, i) => {
-    const pos = QD_POSITIONS[done.length + i];
-    if (!pos) return;
-    svg += `<g transform="translate(${pos.x-8},${pos.y-22})" opacity=".1">
-      <ellipse cx="8" cy="4"  rx="6" ry="4" fill="none" stroke="#aaa" stroke-width="2"/>
-      <rect x="6" y="8" width="4" height="14" rx="2" fill="#aaa" opacity=".4"/>
-      <ellipse cx="8" cy="26" rx="6" ry="4" fill="none" stroke="#aaa" stroke-width="2"/>
-    </g>`;
-  });
   g.innerHTML = svg;
 }
 
