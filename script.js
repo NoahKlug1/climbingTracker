@@ -591,16 +591,15 @@ function renderExerciseChart(exId, viewKey) {
     const baseY     = svgH-18;
     let curY        = baseY;
 
-    // Stacked segments — clean, no text labels
+    // Stacked segments — all with rounded corners, 2px gap between them
     d.loads.forEach((load, si) => {
       if (load<=0) return;
-      const segH  = Math.max(2, Math.round((load/d.total)*totalBarH));
+      const segH  = Math.max(4, Math.round((load/d.total)*totalBarH));
       const col   = SEG_COLS[si%SEG_COLS.length];
-      const sy    = curY-segH;
-      const gap2  = si>0 ? 1 : 0;
-      const isTop = (si===d.loads.length-1) || (si===0 && d.loads.length===1);
-      bars += `<rect x="${x}" y="${sy+gap2}" width="${barW}" height="${Math.max(1,segH-gap2)}"
-        rx="${isTop?'4':'0'}" fill="${col}" opacity="0.85" border-radius="4"/>`;
+      const gap2  = si>0 ? 2 : 0;
+      const sy    = curY - segH;
+      bars += `<rect x="${x}" y="${sy+gap2}" width="${barW}" height="${Math.max(3,segH-gap2)}"
+        rx="3" fill="${col}" opacity="0.88"/>`;
       curY -= segH;
     });
 
@@ -674,7 +673,7 @@ function showChartTooltip(e, chartId, idx) {
     : Math.round(d.total) + ' sek';
 
   const dots = d.segCols.map((col,i) =>
-    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;z-index:-10;"></span>`
+    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;"></span>`
   );
 
   const rows = d.lines.map((line, i) => `
@@ -689,24 +688,42 @@ function showChartTooltip(e, chartId, idx) {
     <div class="tip-bw">Körpergewicht: ${d.bw} kg</div>
     ${rows}`;
 
-  // Position tooltip above the touched bar, clamped to chart width
+  // Show tooltip first (hidden) so we can measure its height
+  tip.style.visibility = 'hidden';
   tip.style.display = 'block';
-  const wrap  = tip.parentElement;
-  const wrapW = wrap.getBoundingClientRect().width || 300;
-  const tipW  = Math.min(200, wrapW - 16);
+  tip.style.top = '0';
+  tip.style.bottom = 'auto';
+  tip.style.left = '0';
+
+  const wrap    = tip.parentElement;
+  const wrapW   = wrap.getBoundingClientRect().width || 300;
+  const tipW    = Math.min(220, wrapW - 16);
   tip.style.width = tipW + 'px';
 
-  // Get bar x from event
+  // Horizontal: centre on touched bar, clamped to wrap
   let clientX;
   if (e.touches && e.touches[0]) clientX = e.touches[0].clientX;
   else clientX = e.clientX;
   const wrapRect = wrap.getBoundingClientRect();
-  let left = clientX - wrapRect.left - tipW/2;
+  let left = clientX - wrapRect.left - tipW / 2;
   left = Math.max(8, Math.min(left, wrapW - tipW - 8));
-  tip.style.left = left + 'px';
-  tip.style.zIndex = 15;
-  tip.style.bottom = '30px';
-  tip.style.top = 'auto';
+
+  // Vertical: measure rendered tip height, place it above the chart bars
+  // chart-wrap has position:relative; bars start at y=0 in SVG but SVG top edge ≈ wrap top
+  const tipH  = tip.getBoundingClientRect().height || 100;
+  const topPx = Math.max(4, wrapRect.top - wrap.getBoundingClientRect().top); // usually ~0
+  // Place above touch point, but at least 8px from top of wrap
+  let clientY;
+  if (e.touches && e.touches[0]) clientY = e.touches[0].clientY;
+  else clientY = e.clientY;
+  let top = clientY - wrapRect.top - tipH - 12;
+  top = Math.max(4, top);  // never go above wrap
+
+  tip.style.left    = left + 'px';
+  tip.style.top     = top + 'px';
+  tip.style.bottom  = 'auto';
+  tip.style.zIndex  = 50;
+  tip.style.visibility = 'visible';
 }
 
 function hideChartTooltip(chartId) {
