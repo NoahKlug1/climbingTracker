@@ -421,6 +421,11 @@ function renderExerciseForm(exId, viewKey) {
 }
 
 function fmtVal(val, field) {
+  // For weight fields: show explicit +/- sign
+  if (field && field.id === 'weight') {
+    const v = field.step < 1 ? parseFloat(val).toFixed(1) : val;
+    return val > 0 ? '+' + v : String(v);
+  }
   if (!field || field.step < 1) return typeof val === 'number' ? val.toFixed(1) : val;
   return val;
 }
@@ -473,30 +478,26 @@ function renderExercisePR(exId, viewKey) {
   let html = '';
 
   if (exId === 'pullups') {
-    // Best set = highest total load (reps × (bodyweight + extraweight))
-    // Show: reps @ +Xkg  or just reps if no extra weight
-    const bw = bodyweight || 75;
-    let bestSet = null, bestLoad = 0;
-    allSets.forEach(s => {
-      const load = (s.reps || 0) * (bw + (s.weight || 0));
-      if (load > bestLoad) { bestLoad = load; bestSet = s; }
-    });
+    // Best set = most reps
+    let bestSet = null;
+    allSets.forEach(s => { if ((s.reps||0) > (bestSet?.reps||0)) bestSet = s; });
     if (bestSet) {
       html = `<span class="pr-val">${bestSet.reps}</span><span class="pr-unit"> reps</span>`;
-      if (bestSet.weight > 0) html += `<span class="pr-sep"> @ </span><span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
-      html += `<div class="pr-total-load">${bestLoad.toFixed(0)} kg Gesamtlast</div>`;
+      if (bestSet.weight !== 0) {
+        const wSign = bestSet.weight > 0 ? '+' : '';
+        html += `<span class="pr-sep">  </span><span class="pr-val">${wSign}${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
+      }
     }
   } else if (exId === 'hangboard') {
-    // Best set = highest total load (duration × (bodyweight + extraweight))
-    const bw = bodyweight || 75;
-    let bestSet = null, bestLoad = 0;
-    allSets.forEach(s => {
-      const load = (s.duration || 0) * (bw + (s.weight || 0));
-      if (load > bestLoad) { bestLoad = load; bestSet = s; }
-    });
+    // Best set = longest duration
+    let bestSet = null;
+    allSets.forEach(s => { if ((s.duration||0) > (bestSet?.duration||0)) bestSet = s; });
     if (bestSet) {
       html = `<span class="pr-val">${bestSet.duration}</span><span class="pr-unit"> sek</span>`;
-      if (bestSet.weight > 0) html += `<span class="pr-sep"> @ </span><span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
+      if (bestSet.weight !== 0) {
+        const wSign = bestSet.weight > 0 ? '+' : '';
+        html += `<span class="pr-sep">  </span><span class="pr-val">${wSign}${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
+      }
     }
   } else if (exId === 'deadhang') {
     const maxDur = Math.max(...allSets.map(s => s.duration || 0));
@@ -535,8 +536,8 @@ function renderExerciseChart(exId, viewKey) {
 
   function entryLoad(w) {
     const s = w.sets || [];
-    if (exId==='pullups')   return s.reduce((a,x)=>a+(x.reps||0)*(bx.weight||0),0);
-    if (exId==='hangboard') return s.reduce((a,x)=>a+(x.duration||0)*(x.weight||0),0);
+    if (exId==='pullups')   return s.reduce((a,x)=>a+(x.reps||0),0);
+    if (exId==='hangboard') return s.reduce((a,x)=>a+(x.duration||0),0);
     if (exId==='deadhang')  return s.reduce((a,x)=>a+(x.duration||0),0);
     if (exId==='lsit')      return s.reduce((a,x)=>a+(x.duration||0)*(x.sets||1),0);
     return 0;
@@ -550,14 +551,16 @@ function renderExerciseChart(exId, viewKey) {
     // tooltip lines per entry
     const tipLines = entries.map((w,si) => {
       const s = (w.sets||[])[0] || {};
-      if (exId==='pullups')
-        return s.reps
-          ? `${s.reps} Wdh × ${(s.weight||0)} kg = ${((s.reps||0)*(s.weight||0)).toFixed(0)} kg`
-          : '';
-      if (exId==='hangboard')
-        return s.duration
-          ? `${s.duration}s × ${bw+(s.weight||0)} kg = ${((s.duration||0)*(s.weight||0)).toFixed(0)} kg`
-          : '';
+      if (exId==='pullups') {
+        if (!s.reps) return '';
+        const wLabel = s.weight > 0 ? ` +${s.weight} kg` : s.weight < 0 ? ` ${s.weight} kg` : '';
+        return `${s.reps} Wdh${wLabel}`;
+      }
+      if (exId==='hangboard') {
+        if (!s.duration) return '';
+        const wLabel = s.weight > 0 ? ` +${s.weight} kg` : s.weight < 0 ? ` ${s.weight} kg` : '';
+        return `${s.duration} sek${wLabel}`;
+      }
       if (exId==='deadhang')  return s.duration ? `${s.duration} sek` : '';
       if (exId==='lsit')      return s.duration ? `${s.duration}s × ${s.sets||1} Sätze` : '';
       return '';
@@ -628,7 +631,7 @@ function renderExerciseChart(exId, viewKey) {
     });
   });
 
-  const unitLabel = exId==='pullups'||exId==='hangboard' ? 'Gesamtlast (kg)' : 'Gesamtzeit (sek)';
+  const unitLabel = exId==='pullups' ? 'Reps' : 'Sekunden';
   const totalSvgW = Math.max(n*(barW+gap)+startX*2, svgW);
 
   el.innerHTML = `
@@ -666,9 +669,9 @@ function showChartTooltip(e, chartId, idx) {
   if (!data || !data[idx]) return;
   const d = data[idx];
 
-  const dispTotal = (chartId.includes('klimmzuege')||chartId.includes('fingerboard'))
-    ? (d.reps +' reps')
-    : Math.round(d.duration)+' sek';
+  const dispTotal = chartId.includes('pullups')
+    ? Math.round(d.total) + ' Wdh'
+    : Math.round(d.total) + ' sek';
 
   const dots = d.segCols.map((col,i) =>
     `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;"></span>`
