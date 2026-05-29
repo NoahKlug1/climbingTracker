@@ -40,7 +40,7 @@ const EXERCISES = {
     id: 'pullups', name: 'KLIMMZÜGE', icon: '🧗',
     fields: [
       { id:'reps',   label:'Wiederholungen',    type:'stepper', min:1,  max:50,   step:1,   default:8,  unit:'reps' },
-      { id:'weight', label:'Zusatzgewicht (kg)', type:'stepper', min:0,  max:9999, step:2.5, default:0,  unit:'kg'  }
+      { id:'weight', label:'Zusatzgewicht (kg)', type:'stepper', min:-100,  max:9999, step:2.5, default:0,  unit:'kg'  }
     ]
   },
   hangboard: {
@@ -48,7 +48,7 @@ const EXERCISES = {
     fields: [
       { id:'duration', label:'Haltedauer (Sek.)', type:'stepper', min:1, max:120,  step:1,   default:10, unit:'sek'   },
       { id:'sets',     label:'Sätze',             type:'stepper', min:1, max:20,   step:1,   default:6,  unit:'sätze' },
-      { id:'weight',   label:'Zusatzgew. (kg)',   type:'stepper', min:0, max:9999, step:2.5, default:0,  unit:'kg'   }
+      { id:'weight',   label:'Zusatzgew. (kg)',   type:'stepper', min:-100, max:9999, step:2.5, default:0,  unit:'kg'   }
     ]
   },
   deadhang: {
@@ -535,8 +535,8 @@ function renderExerciseChart(exId, viewKey) {
 
   function entryLoad(w) {
     const s = w.sets || [];
-    if (exId==='pullups')   return s.reduce((a,x)=>a+(x.reps||0)*(bw+(x.weight||0)),0);
-    if (exId==='hangboard') return s.reduce((a,x)=>a+(x.duration||0)*(bw+(x.weight||0)),0);
+    if (exId==='pullups')   return s.reduce((a,x)=>a+(x.reps||0)*(bx.weight||0),0);
+    if (exId==='hangboard') return s.reduce((a,x)=>a+(x.duration||0)*(x.weight||0),0);
     if (exId==='deadhang')  return s.reduce((a,x)=>a+(x.duration||0),0);
     if (exId==='lsit')      return s.reduce((a,x)=>a+(x.duration||0)*(x.sets||1),0);
     return 0;
@@ -552,11 +552,11 @@ function renderExerciseChart(exId, viewKey) {
       const s = (w.sets||[])[0] || {};
       if (exId==='pullups')
         return s.reps
-          ? `${s.reps} Wdh × ${bw+(s.weight||0)} kg = ${((s.reps||0)*(bw+(s.weight||0))).toFixed(0)} kg`
+          ? `${s.reps} Wdh × ${(s.weight||0)} kg = ${((s.reps||0)*(s.weight||0)).toFixed(0)} kg`
           : '';
       if (exId==='hangboard')
         return s.duration
-          ? `${s.duration}s × ${bw+(s.weight||0)} kg = ${((s.duration||0)*(bw+(s.weight||0))).toFixed(0)} kg`
+          ? `${s.duration}s × ${bw+(s.weight||0)} kg = ${((s.duration||0)*(s.weight||0)).toFixed(0)} kg`
           : '';
       if (exId==='deadhang')  return s.duration ? `${s.duration} sek` : '';
       if (exId==='lsit')      return s.duration ? `${s.duration}s × ${s.sets||1} Sätze` : '';
@@ -667,8 +667,8 @@ function showChartTooltip(e, chartId, idx) {
   const d = data[idx];
 
   const dispTotal = (chartId.includes('klimmzuege')||chartId.includes('fingerboard'))
-    ? (d.total>=1000?(d.total/1000).toFixed(1)+'t':Math.round(d.total)+' kg')
-    : Math.round(d.total)+' sek';
+    ? (d.reps +' reps')
+    : Math.round(d.duration)+' sek';
 
   const dots = d.segCols.map((col,i) =>
     `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;"></span>`
@@ -701,6 +701,7 @@ function showChartTooltip(e, chartId, idx) {
   let left = clientX - wrapRect.left - tipW/2;
   left = Math.max(8, Math.min(left, wrapW - tipW - 8));
   tip.style.left = left + 'px';
+  tip.style.zIndex = 10;
   tip.style.bottom = '30px';
   tip.style.top = 'auto';
 }
