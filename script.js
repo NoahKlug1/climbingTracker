@@ -475,21 +475,23 @@ function renderExercisePR(exId, viewKey) {
   if (exId === 'pullups') {
     // Best set = highest total load (reps × (bodyweight + extraweight))
     // Show: reps @ +Xkg  or just reps if no extra weight
+    const bw = bodyweight || 75;
     let bestSet = null, bestLoad = 0;
     allSets.forEach(s => {
-      const load = (s.reps || 0) * (s.weight || 0);
+      const load = (s.reps || 0) * (bw + (s.weight || 0));
       if (load > bestLoad) { bestLoad = load; bestSet = s; }
     });
     if (bestSet) {
       html = `<span class="pr-val">${bestSet.reps}</span><span class="pr-unit"> reps</span>`;
-      if (bestSet.weight > 0) html += `<span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
+      if (bestSet.weight > 0) html += `<span class="pr-sep"> @ </span><span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
       html += `<div class="pr-total-load">${bestLoad.toFixed(0)} kg Gesamtlast</div>`;
     }
   } else if (exId === 'hangboard') {
     // Best set = highest total load (duration × (bodyweight + extraweight))
+    const bw = bodyweight || 75;
     let bestSet = null, bestLoad = 0;
     allSets.forEach(s => {
-      const load = (s.duration || 0) * (s.weight || 0);
+      const load = (s.duration || 0) * (bw + (s.weight || 0));
       if (load > bestLoad) { bestLoad = load; bestSet = s; }
     });
     if (bestSet) {
@@ -515,18 +517,14 @@ function renderExercisePR(exId, viewKey) {
 }
 
 // ---- CHART ----
-// Bar chart: x = date, bar height = total load for that day, split segments per entry
 function renderExerciseChart(exId, viewKey) {
   const el = document.getElementById(viewKey + '-chart');
   if (!el) return;
   const raw = workouts.filter(w => w.exerciseId === exId);
   if (raw.length < 1) { el.innerHTML = `<div class="chart-empty">Mindestens 1 Eintrag für den Verlauf</div>`; return; }
 
-  // Sort chronologically (oldest first)
-  const sorted = raw.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
-
-  // Group by day-string (YYYY-MM-DD)
-  const byDay = {};
+  const sorted = raw.slice().sort((a,b) => new Date(a.date)-new Date(b.date));
+  const byDay  = {};
   sorted.forEach(w => {
     const day = w.date.split('T')[0];
     if (!byDay[day]) byDay[day] = [];
@@ -535,81 +533,103 @@ function renderExerciseChart(exId, viewKey) {
   const days = Object.keys(byDay).sort();
   const bw   = bodyweight || 75;
 
-  // Compute per-day total-load and per-entry segment values
-  // For pullups/hangboard: total load = sum of reps*(bw+weight) or duration*(bw+weight)
-  // For deadhang/lsit:     total = max duration (visual: sum of all set durations)
   function entryLoad(w) {
     const s = w.sets || [];
-    if (exId === 'pullups')   return s.reduce((acc, x) => acc + (x.reps||0)*(x.weight||0), 0);
-    if (exId === 'hangboard') return s.reduce((acc, x) => acc + (x.duration||0)*(x.weight||0), 0);
-    if (exId === 'deadhang')  return s.reduce((acc, x) => acc + (x.duration||0), 0);
-    if (exId === 'lsit')      return s.reduce((acc, x) => acc + (x.duration||0)*(x.sets||1), 0);
+    if (exId==='pullups')   return s.reduce((a,x)=>a+(x.reps||0)*(bw+(x.weight||0)),0);
+    if (exId==='hangboard') return s.reduce((a,x)=>a+(x.duration||0)*(bw+(x.weight||0)),0);
+    if (exId==='deadhang')  return s.reduce((a,x)=>a+(x.duration||0),0);
+    if (exId==='lsit')      return s.reduce((a,x)=>a+(x.duration||0)*(x.sets||1),0);
     return 0;
   }
 
-  const dayLoads = days.map(day => ({
-    day,
-    label: day.slice(5),
-    entries: byDay[day],
-    loads:   byDay[day].map(entryLoad),
-    total:   byDay[day].map(entryLoad).reduce((a,b)=>a+b,0)
-  }));
+  // Build tooltip data for each day (JSON-safe)
+  const dayLoads = days.map(day => {
+    const entries = byDay[day];
+    const loads   = entries.map(entryLoad);
+    const total   = loads.reduce((a,b)=>a+b,0);
+    // tooltip lines per entry
+    const tipLines = entries.map((w,si) => {
+      const s = (w.sets||[])[0] || {};
+      if (exId==='pullups')
+        return s.reps
+          ? `${s.reps} Wdh × ${bw+(s.weight||0)} kg = ${((s.reps||0)*(bw+(s.weight||0))).toFixed(0)} kg`
+          : '';
+      if (exId==='hangboard')
+        return s.duration
+          ? `${s.duration}s × ${bw+(s.weight||0)} kg = ${((s.duration||0)*(bw+(s.weight||0))).toFixed(0)} kg`
+          : '';
+      if (exId==='deadhang')  return s.duration ? `${s.duration} sek` : '';
+      if (exId==='lsit')      return s.duration ? `${s.duration}s × ${s.sets||1} Sätze` : '';
+      return '';
+    }).filter(Boolean);
+    return { day, label: day.slice(5), loads, total, entries, tipLines };
+  });
 
-  const maxLoad = Math.max(...dayLoads.map(d => d.total), 1);
-  const svgW    = Math.max(300, (window.innerWidth || 400) - 52);
-  const svgH    = 130;
-  const barArea = svgH - 28;    // usable height for bars
-  const n       = dayLoads.length;
-  const barW    = Math.max(18, Math.min(44, Math.floor((svgW - 20) / n) - 4));
-  const gap     = Math.max(4, Math.floor((svgW - 20 - n * barW) / Math.max(n - 1, 1)));
-  const startX  = Math.floor((svgW - (n * barW + (n-1)*gap)) / 2);
-
-  // Segment colour palette (per entry within a day)
+  const maxLoad  = Math.max(...dayLoads.map(d=>d.total), 1);
+  const svgW     = Math.max(300, (window.innerWidth||400)-52);
+  const svgH     = 140;
+  const barArea  = svgH - 26;
+  const n        = dayLoads.length;
+  const barW     = Math.max(20, Math.min(48, Math.floor((svgW-20)/n)-5));
+  const gap      = Math.max(4, Math.floor((svgW-20-n*barW)/Math.max(n-1,1)));
+  const startX   = Math.floor((svgW-(n*barW+(n-1)*gap))/2);
   const SEG_COLS = ['#FF6B35','#FFD60A','#30D158','#0A84FF','#BF5AF2'];
+  const chartId  = `chart_${exId}`;
 
   let bars = '';
-  dayLoads.forEach((d, i) => {
-    const x        = startX + i * (barW + gap);
-    const totalBarH= Math.max(3, Math.round((d.total / maxLoad) * (barArea - 14)));
-    const baseY    = svgH - 18;
-    let curY       = baseY;
+  // Invisible wide hit-areas on top for touch/hover
+  let hitAreas = '';
+  // Store tooltip data in a JS-safe way per bar index
+  const tooltipData = [];
 
-    // Draw stacked segments bottom-up
+  dayLoads.forEach((d, i) => {
+    const x         = startX + i*(barW+gap);
+    const totalBarH = Math.max(4, Math.round((d.total/maxLoad)*(barArea-18)));
+    const baseY     = svgH-18;
+    let curY        = baseY;
+
+    // Stacked segments — clean, no text labels
     d.loads.forEach((load, si) => {
-      if (load <= 0) return;
-      const segH = Math.max(2, Math.round((load / d.total) * totalBarH));
-      const col  = SEG_COLS[si % SEG_COLS.length];
-      const sy   = curY - segH;
-      // tiny gap between segments
-      const gap2 = si > 0 ? 1 : 0;
-      bars += `<rect x="${x}" y="${sy + gap2}" width="${barW}" height="${Math.max(1,segH-gap2)}" rx="${si===0?'3 3 0 0':'0'}" fill="${col}" opacity="0.88"/>`;
-      // label inside segment if tall enough
-      const s = (d.entries[si].sets||[])[0] || {};
-      let lbl = '';
-      if (exId==='pullups')   lbl = s.reps ? `${s.reps}r${s.weight?'+'+s.weight:''}` : '';
-      if (exId==='hangboard') lbl = s.duration ? `${s.duration}s${s.weight?'+'+s.weight:''}` : '';
-      if (exId==='deadhang')  lbl = s.duration ? `${s.duration}s` : '';
-      if (exId==='lsit')      lbl = s.duration ? `${s.duration}s` : '';
-      if (lbl && segH >= 14) {
-        bars += `<text x="${x+barW/2}" y="${sy+segH/2+gap2+3.5}" text-anchor="middle" fill="rgba(0,0,0,0.75)" font-size="7" font-family="Inter" font-weight="700">${lbl}</text>`;
-      }
+      if (load<=0) return;
+      const segH  = Math.max(2, Math.round((load/d.total)*totalBarH));
+      const col   = SEG_COLS[si%SEG_COLS.length];
+      const sy    = curY-segH;
+      const gap2  = si>0 ? 1 : 0;
+      const isTop = (si===d.loads.length-1) || (si===0 && d.loads.length===1);
+      bars += `<rect x="${x}" y="${sy+gap2}" width="${barW}" height="${Math.max(1,segH-gap2)}"
+        rx="${isTop?'4':'0'}" fill="${col}" opacity="0.85"/>`;
       curY -= segH;
     });
 
-    // Total value above bar
-    const dispVal = exId==='pullups'||exId==='hangboard'
-      ? (d.total >= 1000 ? (d.total/1000).toFixed(1)+'t' : Math.round(d.total)+'kg')
-      : Math.round(d.total)+'s';
-    bars += `<text x="${x+barW/2}" y="${baseY-totalBarH-4}" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="7.5" font-family="Inter" font-weight="600">${dispVal}</text>`;
-
-    // Date label below
-    if (n <= 14 || i % Math.max(1,Math.floor(n/7)) === 0) {
-      bars += `<text x="${x+barW/2}" y="${svgH-4}" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="7" font-family="Inter">${d.label}</text>`;
+    // Date label below (only every N bars to avoid clutter)
+    const showLabel = n<=12 || i%Math.max(1,Math.ceil(n/7))===0;
+    if (showLabel) {
+      bars += `<text x="${x+barW/2}" y="${svgH-4}" text-anchor="middle"
+        fill="rgba(255,255,255,0.28)" font-size="7" font-family="Inter">${d.label}</text>`;
     }
+
+    // Invisible hit area covering full bar column height
+    hitAreas += `<rect x="${x-2}" y="0" width="${barW+4}" height="${svgH-18}"
+      fill="transparent" class="bar-hit"
+      data-chart="${chartId}" data-idx="${i}"
+      onmouseenter="showChartTooltip(event,'${chartId}',${i})"
+      onmouseleave="hideChartTooltip('${chartId}')"
+      ontouchstart="showChartTooltip(event,'${chartId}',${i});event.preventDefault();"
+      ontouchend="hideChartTooltipDelayed('${chartId}')"/>`;
+
+    // Store tooltip payload
+    tooltipData.push({
+      day:      d.day,
+      total:    d.total,
+      lines:    d.tipLines,
+      bw:       bw,
+      segCols:  d.loads.map((_,si)=>SEG_COLS[si%SEG_COLS.length]),
+      n:        d.loads.length
+    });
   });
 
-  // Unit label
   const unitLabel = exId==='pullups'||exId==='hangboard' ? 'Gesamtlast (kg)' : 'Gesamtzeit (sek)';
+  const totalSvgW = Math.max(n*(barW+gap)+startX*2, svgW);
 
   el.innerHTML = `
     <div class="card">
@@ -617,13 +637,83 @@ function renderExerciseChart(exId, viewKey) {
         <span>VERLAUF</span>
         <span style="font-size:0.62rem;color:var(--t3);font-weight:400;">${unitLabel}</span>
       </div>
-      <div class="chart-wrap">
-        <svg width="${Math.max(n*(barW+gap)+40,svgW)}" height="${svgH}" viewBox="0 0 ${Math.max(n*(barW+gap)+40,svgW)} ${svgH}">
-          <line x1="10" y1="${svgH-18}" x2="${Math.max(n*(barW+gap)+40,svgW)-10}" y2="${svgH-18}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+      <div class="chart-wrap" style="position:relative;">
+        <!-- Floating tooltip -->
+        <div id="tip_${chartId}" class="chart-tooltip" style="display:none;"></div>
+        <svg id="${chartId}" width="${totalSvgW}" height="${svgH}"
+             viewBox="0 0 ${totalSvgW} ${svgH}" style="display:block;">
+          <line x1="10" y1="${svgH-18}" x2="${totalSvgW-10}" y2="${svgH-18}"
+                stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
           ${bars}
+          ${hitAreas}
         </svg>
       </div>
     </div>`;
+
+  // Attach data to element so event handlers can find it
+  el.querySelector(`#${chartId}`).__tooltipData = tooltipData;
+}
+
+// ── Tooltip logic ──
+let _tipHideTimer;
+
+function showChartTooltip(e, chartId, idx) {
+  clearTimeout(_tipHideTimer);
+  const svg  = document.getElementById(chartId);
+  const tip  = document.getElementById('tip_' + chartId);
+  if (!svg || !tip) return;
+  const data = svg.__tooltipData;
+  if (!data || !data[idx]) return;
+  const d = data[idx];
+
+  const dispTotal = (chartId.includes('klimmzuege')||chartId.includes('fingerboard'))
+    ? (d.total>=1000?(d.total/1000).toFixed(1)+'t':Math.round(d.total)+' kg')
+    : Math.round(d.total)+' sek';
+
+  const dots = d.segCols.map((col,i) =>
+    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;"></span>`
+  );
+
+  const rows = d.lines.map((line, i) => `
+    <div class="tip-row">
+      ${dots[i]||''}
+      <span>${line}</span>
+    </div>`).join('');
+
+  tip.innerHTML = `
+    <div class="tip-date">${d.day}</div>
+    <div class="tip-total">${dispTotal} gesamt</div>
+    <div class="tip-bw">Körpergewicht: ${d.bw} kg</div>
+    ${rows}`;
+
+  // Position tooltip above the touched bar, clamped to chart width
+  tip.style.display = 'block';
+  const wrap  = tip.parentElement;
+  const wrapW = wrap.getBoundingClientRect().width || 300;
+  const tipW  = Math.min(200, wrapW - 16);
+  tip.style.width = tipW + 'px';
+
+  // Get bar x from event
+  let clientX;
+  if (e.touches && e.touches[0]) clientX = e.touches[0].clientX;
+  else clientX = e.clientX;
+  const wrapRect = wrap.getBoundingClientRect();
+  let left = clientX - wrapRect.left - tipW/2;
+  left = Math.max(8, Math.min(left, wrapW - tipW - 8));
+  tip.style.left = left + 'px';
+  tip.style.bottom = '30px';
+  tip.style.top = 'auto';
+}
+
+function hideChartTooltip(chartId) {
+  const tip = document.getElementById('tip_' + chartId);
+  if (tip) tip.style.display = 'none';
+}
+
+function hideChartTooltipDelayed(chartId) {
+  _tipHideTimer = setTimeout(() => hideChartTooltip(chartId), 1200);
+}
+
 }
 
 // ============================================================
