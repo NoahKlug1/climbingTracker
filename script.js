@@ -480,7 +480,7 @@ function renderExercisePR(exId, viewKey) {
   if (exId === 'pullups') {
     // Best set = most reps
     let bestSet = null;
-    allSets.forEach(s => { if ((s.reps||0) > (bestSet?.reps||0)) bestSet = s; });
+    allSets.forEach(s => { if ((s.weight||0) > (bestSet?.weight||0)) bestSet = s; });
     if (bestSet) {
       html = `<span class="pr-val">${bestSet.reps}</span><span class="pr-unit"> reps</span>`;
       if (bestSet.weight !== 0) {
@@ -674,7 +674,7 @@ function showChartTooltip(e, chartId, idx) {
     : Math.round(d.total) + ' sek';
 
   const dots = d.segCols.map((col,i) =>
-    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;"></span>`
+    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;z-index:15;"></span>`
   );
 
   const rows = d.lines.map((line, i) => `
@@ -704,7 +704,7 @@ function showChartTooltip(e, chartId, idx) {
   let left = clientX - wrapRect.left - tipW/2;
   left = Math.max(8, Math.min(left, wrapW - tipW - 8));
   tip.style.left = left + 'px';
-  tip.style.zIndex = 10;
+  tip.style.zIndex = 15;
   tip.style.bottom = '30px';
   tip.style.top = 'auto';
 }
