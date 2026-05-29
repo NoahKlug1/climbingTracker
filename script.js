@@ -714,8 +714,6 @@ function hideChartTooltipDelayed(chartId) {
   _tipHideTimer = setTimeout(() => hideChartTooltip(chartId), 1200);
 }
 
-}
-
 // ============================================================
 // SLEEP VIEW
 // ============================================================
