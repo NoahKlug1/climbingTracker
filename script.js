@@ -475,23 +475,21 @@ function renderExercisePR(exId, viewKey) {
   if (exId === 'pullups') {
     // Best set = highest total load (reps × (bodyweight + extraweight))
     // Show: reps @ +Xkg  or just reps if no extra weight
-    const bw = bodyweight || 75;
     let bestSet = null, bestLoad = 0;
     allSets.forEach(s => {
-      const load = (s.reps || 0) * (bw + (s.weight || 0));
+      const load = (s.reps || 0) * (s.weight || 0);
       if (load > bestLoad) { bestLoad = load; bestSet = s; }
     });
     if (bestSet) {
       html = `<span class="pr-val">${bestSet.reps}</span><span class="pr-unit"> reps</span>`;
-      if (bestSet.weight > 0) html += `<span class="pr-sep"> @ </span><span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
+      if (bestSet.weight > 0) html += `<span class="pr-val">+${bestSet.weight}</span><span class="pr-unit"> kg</span>`;
       html += `<div class="pr-total-load">${bestLoad.toFixed(0)} kg Gesamtlast</div>`;
     }
   } else if (exId === 'hangboard') {
     // Best set = highest total load (duration × (bodyweight + extraweight))
-    const bw = bodyweight || 75;
     let bestSet = null, bestLoad = 0;
     allSets.forEach(s => {
-      const load = (s.duration || 0) * (bw + (s.weight || 0));
+      const load = (s.duration || 0) * (s.weight || 0);
       if (load > bestLoad) { bestLoad = load; bestSet = s; }
     });
     if (bestSet) {
@@ -542,8 +540,8 @@ function renderExerciseChart(exId, viewKey) {
   // For deadhang/lsit:     total = max duration (visual: sum of all set durations)
   function entryLoad(w) {
     const s = w.sets || [];
-    if (exId === 'pullups')   return s.reduce((acc, x) => acc + (x.reps||0)*(bw+(x.weight||0)), 0);
-    if (exId === 'hangboard') return s.reduce((acc, x) => acc + (x.duration||0)*(bw+(x.weight||0)), 0);
+    if (exId === 'pullups')   return s.reduce((acc, x) => acc + (x.reps||0)*(x.weight||0), 0);
+    if (exId === 'hangboard') return s.reduce((acc, x) => acc + (x.duration||0)*(x.weight||0), 0);
     if (exId === 'deadhang')  return s.reduce((acc, x) => acc + (x.duration||0), 0);
     if (exId === 'lsit')      return s.reduce((acc, x) => acc + (x.duration||0)*(x.sets||1), 0);
     return 0;
