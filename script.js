@@ -600,7 +600,7 @@ function renderExerciseChart(exId, viewKey) {
       const gap2  = si>0 ? 1 : 0;
       const isTop = (si===d.loads.length-1) || (si===0 && d.loads.length===1);
       bars += `<rect x="${x}" y="${sy+gap2}" width="${barW}" height="${Math.max(1,segH-gap2)}"
-        rx="${isTop?'4':'0'}" fill="${col}" opacity="0.85"/>`;
+        rx="${isTop?'4':'0'}" fill="${col}" opacity="0.85" border-radius="4"/>`;
       curY -= segH;
     });
 
@@ -674,7 +674,7 @@ function showChartTooltip(e, chartId, idx) {
     : Math.round(d.total) + ' sek';
 
   const dots = d.segCols.map((col,i) =>
-    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;z-index:15;"></span>`
+    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:4px;flex-shrink:0;z-index:-10;"></span>`
   );
 
   const rows = d.lines.map((line, i) => `
