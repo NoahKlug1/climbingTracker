@@ -559,7 +559,8 @@ function renderExerciseChart(exId, viewKey) {
       if (exId==='hangboard') {
         if (!s.duration) return '';
         const wLabel = s.weight > 0 ? ` +${s.weight} kg` : s.weight < 0 ? ` ${s.weight} kg` : '';
-        return `${s.duration} sek${wLabel}`;
+        const setLabel = s.sets ? ` (${s.sets}×)` : '';
+        return `${s.duration} sek${wLabel}${setLabel}`;
       }
       if (exId==='deadhang')  return s.duration ? `${s.duration} sek` : '';
       if (exId==='lsit')      return s.duration ? `${s.duration}s × ${s.sets||1} Sätze` : '';

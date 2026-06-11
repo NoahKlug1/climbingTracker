@@ -395,6 +395,7 @@ select.input-field { background-image: url("data:image/svg+xml,%3Csvg xmlns='htt
 .date-row {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 12px;
+  margin-top: 14px;
 }
 /* iOS-safe: visible, fully-styled date input — no hidden overlays */
 .date-input-visible {
@@ -478,7 +479,7 @@ select.input-field { background-image: url("data:image/svg+xml,%3Csvg xmlns='htt
   border: 1px solid rgba(255,255,255,0.14);
   border-radius: 12px;
   padding: 10px 12px;
-  z-index: 50;
+  z-index: 9999;
   pointer-events: none;
   box-shadow: 0 8px 28px rgba(0,0,0,0.55);
   backdrop-filter: blur(12px);
