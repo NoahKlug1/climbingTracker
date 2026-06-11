@@ -809,18 +809,94 @@ function renderSleepStats() {
     container.innerHTML = `<div class="empty-state"><span class="empty-state-icon">🌙</span><div class="empty-state-text">Noch keine Schlafdaten</div></div>`;
     return;
   }
-  const recent = sleepData.slice(0, 7).slice().reverse();
+  
+  const recent7  = sleepData.slice(0, 7);
+  const recent14 = sleepData.slice(0, 14);
+  const recent30 = sleepData.slice(0, 30);
+  
+  // ── Berechnungen ──
+  const avg7Hours   = recent7.reduce((a,b)=>a+b.hours,0)/recent7.length;
+  const avg14Hours  = recent14.reduce((a,b)=>a+b.hours,0)/recent14.length;
+  const avg30Hours  = recent30.reduce((a,b)=>a+b.hours,0)/recent30.length;
+  
+  const avg7Quality = recent7.reduce((a,b)=>a+b.quality,0)/recent7.length;
+  const avg30Quality = recent30.reduce((a,b)=>a+b.quality,0)/recent30.length;
+  
+  const consistency = (recent7.filter(s => s.hours>=7 && s.hours<=9).length / recent7.length * 100).toFixed(0);
+  const totalSleep = recent30.reduce((a,b)=>a+b.hours,0);
+  
+  // ── Best & Worst ──
+  const best = recent30.reduce((max, s) => s.quality > max.quality ? s : max, recent30[0]);
+  const worst = recent30.reduce((min, s) => s.quality < min.quality ? s : min, recent30[0]);
+  
+  // ── Trend (7d vs 14d) ──
+  const hoursTrend = avg7Hours >= avg14Hours ? '📈' : '📉';
+  const qualityTrend = avg7Quality >= (recent14.slice(7,14).reduce((a,b)=>a+b.quality,0)/(recent14.length-7)) ? '📈' : '📉';
+  
+  const recent_for_chart = recent7.slice().reverse();
+  
   container.innerHTML = `
     <div class="card">
-      <div class="card-title">LETZTE 7 NÄCHTE</div>
-      <div class="chart-wrap">${renderSleepChart(recent.map(s=>({label:s.date.slice(5),value:s.hours})))}</div>
-      <div style="margin-top:10px;">
+      <div class="card-title">📊 DETAILLIERTE STATISTIK</div>
+      
+      <!-- Zeitfenster Tabs -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px;">
+        <div style="background:var(--bg4);border-radius:6px;padding:10px;text-align:center;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;">7 TAGE</div>
+          <div style="font-size:1.2rem;font-weight:700;color:var(--t1);">${avg7Hours.toFixed(1)}h</div>
+        </div>
+        <div style="background:var(--bg4);border-radius:6px;padding:10px;text-align:center;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;">14 TAGE</div>
+          <div style="font-size:1.2rem;font-weight:700;color:var(--t1);">${avg14Hours.toFixed(1)}h</div>
+        </div>
+        <div style="background:var(--bg4);border-radius:6px;padding:10px;text-align:center;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;">30 TAGE</div>
+          <div style="font-size:1.2rem;font-weight:700;color:var(--t1);">${avg30Hours.toFixed(1)}h</div>
+        </div>
+      </div>
+      
+      <!-- Chart -->
+      <div class="chart-wrap">${renderSleepChart(recent_for_chart.map(s=>({label:s.date.slice(5),value:s.hours})))}</div>
+      
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+        <div style="background:rgba(48,209,152,.1);border-radius:6px;padding:10px;border-left:3px solid #30D158;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:3px;">⚖️ KONSISTENZ</div>
+          <div style="font-size:1.3rem;font-weight:700;color:#30D158;">${consistency}%</div>
+          <div style="font-size:.7rem;color:var(--t2);margin-top:2px;">Nächte 7–9h</div>
+        </div>
+        <div style="background:rgba(255,107,53,.1);border-radius:6px;padding:10px;border-left:3px solid #FF6B35;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:3px;">📈 QUALITÄT (30d)</div>
+          <div style="font-size:1.3rem;font-weight:700;color:#FF6B35;">${'★'.repeat(Math.round(avg30Quality))}</div>
+          <div style="font-size:.7rem;color:var(--t2);margin-top:2px;">Ø Rating</div>
+        </div>
+      </div>
+      
+      <!-- Trends & Highlights -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--sep);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:8px 0;">
+          <span style="font-size:.75rem;font-weight:600;color:var(--t2);">TREND DAUER ${hoursTrend}</span>
+          <span style="font-size:.85rem;font-weight:600;color:${avg7Hours > avg14Hours ? '#30D158' : '#FF6B35'}">${avg7Hours > avg14Hours ? '+' : ''}${(avg7Hours - avg14Hours).toFixed(1)}h</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--sep);">
+          <span style="font-size:.75rem;font-weight:600;color:var(--t2);">🌟 BESTE NACHT</span>
+          <span style="display:flex;gap:6px;align-items:center;">
+            <span style="font-size:.8rem;color:var(--t2);">${best.date}</span>
+            <span style="font-size:.9rem;font-weight:700;color:var(--gold);">${'★'.repeat(best.quality)}</span>
+          </span>
+        </div>
+      </div>
+      
+      <!-- Letzte Einträge -->
+      <div style="margin-top:12px;">
+        <div style="font-size:.65rem;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Letzte 10 Nächte</div>
         ${sleepData.slice(0,10).map(s=>`
           <div class="stat-row">
             <span style="font-size:.75rem;color:var(--t2)">${s.date}</span>
             <span style="display:flex;align-items:center;gap:8px;">
               <span style="font-size:.9rem;font-weight:700;color:var(--t1)">${s.hours}h</span>
               <span style="font-size:.75rem;color:var(--gold)">${'★'.repeat(s.quality)}</span>
+              ${s.hrv ? `<span style="font-size:.7rem;color:var(--t3);">HRV ${s.hrv}ms</span>` : ''}
             </span>
           </div>`).join('')}
       </div>
@@ -966,10 +1042,66 @@ function getSleepTips() {
   const avg    = recent.reduce((a,b)=>a+b.hours,0)/recent.length;
   const avgQ   = recent.reduce((a,b)=>a+b.quality,0)/recent.length;
   const score  = Math.round((avg/8)*50+(avgQ/5)*50);
-  if (avg  <  7) tips.push({icon:'😴',title:'Mehr Schlaf!',text:`Ø ${avg.toFixed(1)}h – Kletterathlet:innen brauchen 7.5–9h.`});
-  else if (avg>=8) tips.push({icon:'🌟',title:'Exzellente Basis!',text:`${avg.toFixed(1)}h – perfekt für intensive Einheiten.`});
-  if (avgQ<=2.5) tips.push({icon:'🌿',title:'Qualität verbessern',text:'Kein Bildschirm 1h vorher, Zimmer 16–18°C.'});
-  if (score>=80) tips.push({icon:'💪',title:'Perfekter Trainingstag!',text:'Dein Score ist stark – ideal für Max-Effort.'});
+  
+  // Variationen bei ähnlichen Bedingungen
+  const sleepTipVariants = [
+    {icon:'😴',title:'Mehr Schlaf gebraucht!',text:`Nur ${avg.toFixed(1)}h Ø – Atlas braucht mindestens 8h! 🦾`},
+    {icon:'💤',title:'Unterforderter Körper!',text:`${avg.toFixed(1)}h ist unter dem Ideal. Die Progression sitzt im Bett.`},
+    {icon:'🛌',title:'Zeit zu starten',text:`${avg.toFixed(1)}h täglich reicht für intensive Trainingswochen nicht.`},
+  ];
+  
+  const sleepExcellent = [
+    {icon:'🌟',title:'Prä-Trainingstag perfekt!',text:`${avg.toFixed(1)}h – Du bist bereit für Session 🚀`},
+    {icon:'😴',title:'Recovery-Champion!',text:`${avg.toFixed(1)}h – Dein Körper dankt dir morgen am Felsen.`},
+    {icon:'⭐',title:'Ausgezeichnete Basis!',text:`${avg.toFixed(1)}h für intensive Trainingsblöcke optimal.`},
+  ];
+  
+  const qualityTipsBad = [
+    {icon:'🌿',title:'Schlafqualität? Handy weg!',text:'30min vor Bett Display aus – blaues Licht ≠ Einschlafen.'}, 
+    {icon:'❄️',title:'Dein Zimmer ist zu warm',text:'16–18°C ist die Traumtemperatur. Nachts frieren = besser schlafen.'},
+    {icon:'☕',title:'Koffein nach 15:00?',text:'Espresso um 16:00 stört noch um 22:00. Thé statt Kaffee.'},
+  ];
+  
+  const recoveryWarning = [
+    {icon:'⚠️',title:'Zu viel trainiert diese Woche',text:'4+ Sessions + schlechter Schlaf = Übertraining. Rest-Day!'},
+    {icon:'🔥',title:'Burnout-Gefahr',text:'Hohe Last + niedriger Schlaf = Progression stoppt. Pause nötig.'},
+  ];
+  
+  const noRecentTraining = [
+    {icon:'🔥',title:'Psyche fehlt dir!',text:'Kein Training = keine Müdigkeit = schlechter Schlaf. Go climb!'},
+    {icon:'🧗',title:'Trainieren für besseren Schlaf',text:'Intensive Einheit vor 18:00 hilft beim Einschlafen.'},
+  ];
+  
+  // Sleep duration
+  if (avg < 7) {
+    const variant = sleepTipVariants[Math.floor(Math.random() * sleepTipVariants.length)];
+    tips.push(variant);
+  } else if (avg >= 8) {
+    const variant = sleepExcellent[Math.floor(Math.random() * sleepExcellent.length)];
+    tips.push(variant);
+  }
+  
+  // Quality
+  if (avgQ <= 2.5) {
+    const variant = qualityTipsBad[Math.floor(Math.random() * qualityTipsBad.length)];
+    tips.push(variant);
+  }
+  
+  // High score celebrates
+  if (score >= 80) {
+    tips.push({icon:'💪',title:'Peak Recovery-Status!',text:'Heute ist der perfekte Tag für ein Max-Effort-Session!'});
+  }
+  
+  // Check recent workouts
+  const recentWorkouts = workouts.filter(w => (Date.now()-new Date(w.date))/86400000 <= 7);
+  if (recentWorkouts.length >= 5 && avg < 7.5) {
+    const variant = recoveryWarning[Math.floor(Math.random() * recoveryWarning.length)];
+    tips.push(variant);
+  } else if (recentWorkouts.length === 0 && sleepData.length >= 3) {
+    const variant = noRecentTraining[Math.floor(Math.random() * noRecentTraining.length)];
+    tips.push(variant);
+  }
+  
   return tips;
 }
 
@@ -986,29 +1118,108 @@ function getExerciseTips(exId) {
   if (data.length < 2) return tips;
   const all    = data.flatMap(w => w.sets||[]);
   const recent = data.filter(w => (Date.now()-new Date(w.date))/86400000 <= 7);
-
-  if (exId==='pullups') {
-    const max=Math.max(...all.map(s=>s.reps||0),0);
-    if (max>=15) tips.push({icon:'⚖️',title:'Zeit für Gewicht!',text:`${max} Reps – starte mit +5kg für 5 saubere Reps.`});
-    else if (max<5) tips.push({icon:'🎯',title:'Aufbauphase',text:'Negative Klimmzüge und 3–5 Sets täglich helfen.'});
-    else tips.push({icon:'📈',title:'Gut dabei!',text:`Max. ${max} Reps – steigere um 1–2 Reps pro Woche.`});
+  const bw = bodyweight || 75;
+  
+  if (exId === 'pullups') {
+    const max = Math.max(...all.map(s=>s.reps||0),0);
+    const maxWeighted = Math.max(...all.map(s=>s.weight ? s.reps : 0),0);
+    const lastEntry = data[0];
+    const lastReps = lastEntry?.sets?.[0]?.reps || 0;
+    
+    const progressTips = [
+      {icon:'⚖️',title:'Zeit für Zusatzgewicht!',text:`${max} Reps → jetzt +5kg für 5 saubere Reps. Quality > Quantity!`},
+      {icon:'📈',title:'PRs sind nah!',text:`${max} Reps – nächste Woche +1–2 Wiederholungen anpeilen.`},
+    ];
+    
+    const maintenanceTips = [
+      {icon:'🎯',title:'Konsistent! Steigerung unbewusst.',text:`${max} Reps konstant – Kraft wächst auch ohne PR zu checken.`},
+      {icon:'💪',title:'Zeit für Varianten',text:`${max} Reps stabilisiert? Probier Hang-Klimmzüge oder L-Sit Pulls!`},
+    ];
+    
+    const beginnerTips = [
+      {icon:'🔧',title:'Negativ-Training vor regulär',text:'Springe hoch, lass dich LANGSAM (3sec) runter. 3×5 täglich = schnelle Progression.'},
+      {icon:'🤔',title:'Band-Einsatz clever',text:`${max} Reps ohne Band ist das Ziel. Assistenz-Band = schneller zur 10-Rep-Mark!`},
+      {icon:'🧗',title:'Klettern = Klimmzug-Training',text:'Jeder Dyno trainiert deine Kraft. Vollgas am Felsen + Einheiten = +10% in 4 Wochen.'},
+    ];
+    
+    if (max >= 15) {
+      tips.push(progressTips[0]);
+    } else if (max >= 8) {
+      tips.push(maintenanceTips[Math.floor(Math.random() * maintenanceTips.length)]);
+    } else if (max < 5) {
+      tips.push(beginnerTips[Math.floor(Math.random() * beginnerTips.length)]);
+    } else {
+      tips.push(maintenanceTips[0]);
+    }
   }
-  if (exId==='hangboard') {
-    const max=Math.max(...all.map(s=>s.duration||0),0);
-    if (max>=20) tips.push({icon:'🏋️',title:'Gewicht hinzufügen',text:`${max}s – versuche schrittweise +2.5kg.`});
-    else tips.push({icon:'🪨',title:'Fingerboard Grundsatz',text:'7–10sek auf 20mm Leiste. Qualität vor Quantität.'});
+  
+  if (exId === 'hangboard') {
+    const max = Math.max(...all.map(s=>s.duration||0),0);
+    const sets = all.length;
+    
+    const advancedTips = [
+      {icon:'🏋️',title:'Gewicht-Zeit: jetzt!',text:`${max}s → Try +5kg für 7–8sec. Progressive Overload ftw!`},
+      {icon:'🔥',title:'Intensität hochfahren',text:`${max}s locker? Half-Crimp oder Mono-Finger-Holds für nächste Stufe.`},
+    ];
+    
+    const solidTips = [
+      {icon:'🪨',title:'Goldene Regel: 7–10sec Hold',text:`${max}s perfekt. Lass Finger im Spiel, nicht die Sehnen.`},
+      {icon:'⏱️',title:'TUT maximal = Kraft',text:`${max}s × ${sets} Sets ist Standard. Konsistenz über „mega Sessions".`},
+    ];
+    
+    const recoveryReminder = [
+      {icon:'🩹',title:'Hangboard-Verletzungen vermeiden!',text:'Finger-Kraft braucht 48h Recovery. Max 2×/Woche + Warmup!'},
+    ];
+    
+    if (max >= 20) {
+      tips.push(advancedTips[0]);
+    } else if (max >= 10) {
+      tips.push(solidTips[Math.floor(Math.random() * solidTips.length)]);
+    } else {
+      tips.push({icon:'🧗',title:'Hangboard-Anfänger?',text:'Start mit 20mm Leiste, 7–10 sec. Erst wenn komfortabel: +Gewicht.'});
+    }
+    
+    if (recent.length >= 2) {
+      tips.push(recoveryReminder[0]);
+    }
   }
-  if (exId==='deadhang') {
-    const max=Math.max(...all.map(s=>s.duration||0),0);
-    tips.push({icon:'⏱️',title:'Dead Hang Ziel',text:`Rekord: ${max}s. Pro-Ziel: 60s mit Körpergewicht.`});
+  
+  if (exId === 'deadhang') {
+    const max = Math.max(...all.map(s=>s.duration||0),0);
+    
+    const deadhangTips = [
+      {icon:'⏱️',title:'Dead Hang Ziel: 60s+',text:`Aktuell ${max}s – noch ${(60-max).toFixed(0)}s zum Profi-Standard!`},
+      {icon:'🦾',title:'Grip vs. Core Strength',text:`${max}s Hang ist gute Basis. Seitliches Hängen trainiert Anti-Rotation.`},
+      {icon:'💡',title:'Hängen = unterschätzte Rückenvorbereitung',text:`${max}s → Dead Hang vor Kletterei vorwärmen (5sec × 3).`},
+    ];
+    
+    tips.push(deadhangTips[Math.floor(Math.random() * deadhangTips.length)]);
   }
-  if (exId==='lsit') {
-    const max=Math.max(...all.map(s=>s.duration||0),0);
-    if (max<10) tips.push({icon:'💡',title:'L-Sit Aufbau',text:'Starte mit Tuck-L-Sit. Ziel: 10s gehalten.'});
-    else tips.push({icon:'🔥',title:`Starker Kern – ${max}s!`,text:'Versuche L-Sit auf Ringen für mehr Schulteraktivierung.'});
+  
+  if (exId === 'lsit') {
+    const max = Math.max(...all.map(s=>s.duration||0),0);
+    
+    const lsitTips = [
+      {icon:'💪',title:`L-Sit Champion: ${max}s!`,text:'Ringen-L-Sit als nächstes? Massive Schulter-/Core-Aktivierung!'},
+      {icon:'🔥',title:'Falsche L-Sit = weniger Gain',text:'Hüften HÖHER als Schultern. Sonst ist´s ein glorifiziertes Bankdrücken.'},
+      {icon:'🧗',title:'L-Sit on Felsen nutzen',text:`${max}s im Gym = bessere Sicherung am Felsen. Rumpf dankt dir!`},
+      {icon:'💡',title:'Tuck-Progression',text:`${max}s L-Sit? Nächste Woche: 1/4 der Sets mit einer Beinkombination.`},
+    ];
+    
+    if (max < 10) {
+      tips.push({icon:'🎯',title:'L-Sit Aufbau Roadmap',text:'Woche 1–3: Tuck. Woche 4–6: Single-Leg. Woche 7+: Full L-Sit. 💪'});
+    } else {
+      tips.push(lsitTips[Math.floor(Math.random() * lsitTips.length)]);
+    }
   }
-  if (recent.length>=4) tips.push({icon:'⚠️',title:'Erholung!',text:'Viele Einheiten – plane 1–2 Ruhetage ein.'});
-  else if (recent.length===0) tips.push({icon:'🔥',title:'Zurück ans Training!',text:'Diese Woche noch nichts – 15 Min reichen.'});
+  
+  // Übertraining-Warnung
+  if (recent.length >= 5) {
+    tips.push({icon:'⚠️',title:'Recovery-Reminder',text:'5+ Sessions diese Woche – dein Körper sagt danke für 1–2 Rest-Days!'});
+  } else if (recent.length === 0 && data.length >= 5) {
+    tips.push({icon:'🔥',title:'Comeback-Time?',text:'Keine Einheit diese Woche. Muskeln werden ungeduldig! 😉'});
+  }
+  
   return tips;
 }
 
