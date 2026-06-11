@@ -971,14 +971,14 @@ function renderRouteWall() {
   });
 
   // GRADE_ORDER[0]='4' (easiest) … GRADE_ORDER[21]='9a' (hardest)
-  // QD_POSITIONS[0] = topmost position (y=56), QD_POSITIONS[21] = bottom (y=460)
-  // So: gradeIndex 0 → positionIndex 21, gradeIndex 21 → positionIndex 0
-  // i.e. positionIndex = (GRADE_ORDER.length - 1) - gradeIndex
+  // QD_POSITIONS[0] = bottom position (y=460), QD_POSITIONS[21] = top (y=56)
+  // Hardest at top: gradeIndex 21 (9a) → positionIndex 21 (y=56)
+  // Easiest at bottom: gradeIndex 0 (4) → positionIndex 0 (y=460)
   const maxIdx = GRADE_ORDER.length - 1;
   let svg = '';
 
   GRADE_ORDER.forEach((grade, gradeIdx) => {
-    const posIdx = maxIdx - gradeIdx; // invert: hardest at top
+    const posIdx = gradeIdx; // direct: 9a at top, 4 at bottom
     const pos    = QD_POSITIONS[posIdx];
     if (!pos) return;
 
