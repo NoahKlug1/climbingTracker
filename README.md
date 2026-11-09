@@ -1,1 +1,2 @@
-This is a small project where I try to deploy my own tracker for my climbing 
+CrimpLog v2.1 – Klimmzug-Tracker (eine Seite).
+Setup: setup.sql in Supabase ausführen, Widget siehe WIDGET.md.

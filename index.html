@@ -9,19 +9,19 @@
 <meta name="theme-color" content="#000000">
 <title>CrimpLog</title>
 <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="logo.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- AUTH SCREEN -->
+<!-- AUTH -->
 <div id="authScreen" class="auth-screen">
   <div class="auth-card">
     <div class="auth-logo">CRIMP<span>LOG</span></div>
     <div class="auth-sub">CLIMB · TRAIN · CONQUER</div>
     <div id="authTabs" class="auth-tabs">
-      <button class="auth-tab active" onclick="showAuthMode('login')">Anmelden</button>
-      <button class="auth-tab" onclick="showAuthMode('register')">Registrieren</button>
+      <button class="auth-tab active" onclick="showAuthMode('login', this)">Anmelden</button>
+      <button class="auth-tab" onclick="showAuthMode('register', this)">Registrieren</button>
     </div>
     <div id="authError" class="auth-error" style="display:none;"></div>
     <div class="input-group">
@@ -34,233 +34,86 @@
     </div>
     <button class="btn btn-primary" id="authBtn" onclick="handleAuth()">ANMELDEN</button>
     <div class="auth-divider"><span>oder</span></div>
-    <button class="btn btn-oauth" onclick="handleGoogleAuth()">
-      <svg width="18" height="18" viewBox="0 0 18 18" style="flex-shrink:0"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
-      Mit Google anmelden
-    </button>
+    <button class="btn btn-oauth" onclick="handleGoogleAuth()">Mit Google anmelden</button>
     <div id="authLoading" class="auth-loading" style="display:none;"><div class="auth-spinner"></div></div>
   </div>
 </div>
 
-<!-- MAIN APP -->
+<!-- APP -->
 <div id="appScreen" style="display:none;">
-
-<!-- HEADER -->
-<header class="app-header">
-  <div>
-    <div class="app-logo">CRIMP<span>LOG</span><span class="sync-dot" id="syncDot"></span></div>
-    <span class="logo-sub">CLIMB · TRAIN · CONQUER</span>
-  </div>
-  <button class="user-btn" onclick="showUserMenu()" id="userBtn">👤</button>
-</header>
-
-<!-- USER MENU -->
-<div id="userMenu" class="user-menu" style="display:none;">
-  <div class="user-menu-email" id="userMenuEmail"></div>
-  <div class="user-menu-bw">
-    <label class="user-menu-bw-label">⚖️ Körpergewicht</label>
-    <div class="user-menu-bw-row">
-      <input type="number" id="bwInput" class="user-menu-bw-input"
-             placeholder="75" min="30" max="200" step="0.5">
-      <span class="user-menu-bw-unit">kg</span>
-      <button class="user-menu-bw-save" onclick="saveBodyweight(document.getElementById('bwInput').value)">✓</button>
+  <header class="app-header">
+    <div>
+      <div class="app-logo">CRIMP<span>LOG</span><span class="sync-dot" id="syncDot"></span></div>
+      <span class="logo-sub">KLIMMZÜGE</span>
     </div>
+    <button class="user-btn" onclick="showUserMenu()">👤</button>
+  </header>
+
+  <div id="userMenu" class="user-menu" style="display:none;">
+    <div class="user-menu-email" id="userMenuEmail"></div>
+    <button class="user-menu-item neutral" onclick="openSettings()">⚙️ Einstellungen</button>
+    <button class="user-menu-item" onclick="handleLogout()">🚪 Abmelden</button>
   </div>
-  <button class="user-menu-item" onclick="handleLogout()">🚪 Abmelden</button>
-</div>
-<div id="userMenuOverlay" onclick="hideUserMenu()" style="display:none;position:fixed;inset:0;z-index:149;"></div>
+  <div id="userMenuOverlay" onclick="hideUserMenu()" style="display:none;position:fixed;inset:0;z-index:149;"></div>
 
-<!-- ===================== BOTTOM NAV ===================== -->
-<!-- Order: Klimmzüge | Fingerboard | Deadhang | L-Sit | Routen | Schlaf -->
-<nav class="nav-tabs" id="navTabs">
-  <button class="nav-tab active" data-view="klimmzuege">
-    <span class="tab-icon">🧗</span>KLIMMZ.
-  </button>
-  <button class="nav-tab" data-view="fingerboard">
-    <span class="tab-icon">🪨</span>FINGER
-  </button>
-  <button class="nav-tab" data-view="deadhang">
-    <span class="tab-icon">⏱️</span>DEAD
-  </button>
-  <button class="nav-tab" data-view="lsit">
-    <span class="tab-icon">💪</span>L-SIT
-  </button>
-  <button class="nav-tab" data-view="routen">
-    <span class="tab-icon">🏔️</span>ROUTEN
-  </button>
-  <button class="nav-tab" data-view="schlaf">
-    <span class="tab-icon">🌙</span>SCHLAF
-  </button>
-</nav>
-
-<!-- ===== VIEW: KLIMMZÜGE ===== -->
-<div class="view active" id="view-klimmzuege">
-  <div class="section-title">KLIMMZÜGE</div>
-  <div class="section-sub">Tracke deine Klimmzug-Performance</div>
-  <div id="klimmzuege-form"></div>
-  <div id="klimmzuege-pr" class="pr-display"></div>
-  <div id="klimmzuege-chart" class="chart-section"></div>
-  <div class="card coach-card">
-    <div class="coach-header"><span class="coach-icon">⚡</span><div class="card-title" style="margin:0">KI TRAINER</div></div>
-    <div id="klimmzuege-coach"><div class="coach-tip-empty">Logge mehr Einträge für personalisierte Tipps!</div></div>
-  </div>
-</div>
-
-<!-- ===== VIEW: FINGERBOARD ===== -->
-<div class="view" id="view-fingerboard">
-  <div class="section-title">FINGERBOARD</div>
-  <div class="section-sub">Hangboard Training</div>
-  <div id="fingerboard-form"></div>
-  <div id="fingerboard-pr" class="pr-display"></div>
-  <div id="fingerboard-chart" class="chart-section"></div>
-  <div class="card coach-card">
-    <div class="coach-header"><span class="coach-icon">⚡</span><div class="card-title" style="margin:0">KI TRAINER</div></div>
-    <div id="fingerboard-coach"><div class="coach-tip-empty">Logge mehr Einträge für personalisierte Tipps!</div></div>
-  </div>
-</div>
-
-<!-- ===== VIEW: DEADHANG ===== -->
-<div class="view" id="view-deadhang">
-  <div class="section-title">DEAD HANG</div>
-  <div class="section-sub">Maximale Haltedauer</div>
-  <div id="deadhang-form"></div>
-  <div id="deadhang-pr" class="pr-display"></div>
-  <div id="deadhang-chart" class="chart-section"></div>
-  <div class="card coach-card">
-    <div class="coach-header"><span class="coach-icon">⚡</span><div class="card-title" style="margin:0">KI TRAINER</div></div>
-    <div id="deadhang-coach"><div class="coach-tip-empty">Logge mehr Einträge für personalisierte Tipps!</div></div>
-  </div>
-</div>
-
-<!-- ===== VIEW: L-SIT ===== -->
-<div class="view" id="view-lsit">
-  <div class="section-title">L-SIT</div>
-  <div class="section-sub">Isometrische Rumpfkraft</div>
-  <div id="lsit-form"></div>
-  <div id="lsit-pr" class="pr-display"></div>
-  <div id="lsit-chart" class="chart-section"></div>
-  <div class="card coach-card">
-    <div class="coach-header"><span class="coach-icon">⚡</span><div class="card-title" style="margin:0">KI TRAINER</div></div>
-    <div id="lsit-coach"><div class="coach-tip-empty">Logge mehr Einträge für personalisierte Tipps!</div></div>
-  </div>
-</div>
-
-<!-- ===== VIEW: KLETTERROUTEN ===== -->
-<div class="view" id="view-routen">
-  <div class="section-title">KLETTERROUTEN</div>
-  <div class="section-sub">Logge deine gekletterten Routen</div>
-
-  <div class="card route-add-card">
-    <div class="route-add-fields">
-      <div class="input-group" style="flex:1;margin-bottom:0;">
-        <label class="input-label">SCHWIERIGKEIT</label>
-        <select class="input-field" id="routeGrade">
-          <option value="4">4</option>
-          <option value="5a">5a</option><option value="5b">5b</option><option value="5c">5c</option>
-          <option value="6a">6a</option><option value="6a+">6a+</option>
-          <option value="6b">6b</option><option value="6b+">6b+</option>
-          <option value="6c">6c</option><option value="6c+">6c+</option>
-          <option value="7a" selected>7a</option><option value="7a+">7a+</option>
-          <option value="7b">7b</option><option value="7b+">7b+</option>
-          <option value="7c">7c</option><option value="7c+">7c+</option>
-          <option value="8a">8a</option><option value="8a+">8a+</option>
-          <option value="8b">8b</option><option value="8b+">8b+</option>
-          <option value="8c">8c</option><option value="9a">9a</option>
-        </select>
+  <main class="simple-main">
+    <!-- Fortschritt heute -->
+    <div class="goal-card">
+      <div class="goal-top">
+        <span class="goal-label">HEUTE</span>
+        <span class="goal-count" id="goalCount">0 / 100</span>
       </div>
-      <label class="flash-label">
-        <input type="checkbox" id="routeFlash" class="flash-checkbox">
-        <span class="flash-custom-cb"></span>
-        <span class="flash-text">⚡ FLASH</span>
-      </label>
+      <div class="goal-bar"><div class="goal-fill" id="goalFill"></div></div>
     </div>
-    <button class="btn btn-primary" onclick="addRoute()" style="margin-top:12px;">ROUTE HINZUFÜGEN</button>
-  </div>
 
-  <div class="rock-container">
-    <div class="rock-wall">
-      <svg id="rockSvg" viewBox="0 0 340 510" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="rockGrad" cx="38%" cy="28%" r="72%">
-            <stop offset="0%"   stop-color="#4a3728"/>
-            <stop offset="55%"  stop-color="#2d1f14"/>
-            <stop offset="100%" stop-color="#160c06"/>
-          </radialGradient>
-          <filter id="rockShadow">
-            <feDropShadow dx="4" dy="8" stdDeviation="10" flood-color="rgba(0,0,0,0.65)"/>
-          </filter>
-        </defs>
-        <!-- Rock body -->
-        <path d="M 28 490 Q 8 360 18 200 Q 12 95 58 46 Q 98 8 170 3 Q 244,-2 292 38 Q 332 78 327 182 Q 322 305 332 428 Q 330 472 312 490 Z"
-              fill="url(#rockGrad)" filter="url(#rockShadow)"/>
-        <!-- Texture cracks -->
-        <path d="M 58 95 Q 100 82 148 105"          stroke="rgba(255,255,255,0.035)" stroke-width="1.5" fill="none"/>
-        <path d="M 76 198 Q 132 180 185 202 Q 224 192 264 208" stroke="rgba(255,255,255,0.035)" stroke-width="1.5" fill="none"/>
-        <path d="M 38 308 Q 102 290 162 312 Q 212 298 272 318" stroke="rgba(255,255,255,0.035)" stroke-width="1.5" fill="none"/>
-        <path d="M 48 398 Q 122 380 204 398 Q 252 386 302 404" stroke="rgba(255,255,255,0.035)" stroke-width="1.5" fill="none"/>
-        <path d="M 100 148 Q 150 138 200 152"        stroke="rgba(255,255,255,0.025)" stroke-width="1"   fill="none"/>
-        <!-- Quickdraws injected by JS -->
-        <g id="quickdrawsGroup"></g>
-      </svg>
+    <!-- Max -->
+    <div class="max-block">
+      <div class="max-label">🏆 MAX KLIMMZUG + GEWICHT</div>
+      <div class="max-value"><span id="maxValue">–</span><small id="maxUnit"> kg</small></div>
     </div>
-  </div>
-</div>
 
-<!-- ===== VIEW: SCHLAF ===== -->
-<div class="view" id="view-schlaf">
-  <div class="section-title">SCHLAF</div>
-  <div class="section-sub">Tracke deinen Schlaf für bessere Performance</div>
+    <!-- Plus-Buttons -->
+    <div class="plus-row">
+      <div class="plus-col">
+        <button class="plus-btn plus-weight" onclick="addWeight(1)" aria-label="Gewicht erhöhen">+</button>
+        <div class="plus-caption">GEWICHT</div>
+        <div class="plus-sub"><span id="curWeight">0</span> kg
+          <button class="mini-minus" onclick="addWeight(-1)" aria-label="Gewicht verringern">−</button>
+        </div>
+      </div>
+      <div class="plus-col">
+        <button class="plus-btn plus-reps" onclick="addReps()" aria-label="Reps hinzufügen">+</button>
+        <div class="plus-caption">REPS</div>
+        <div class="plus-sub"><span id="repStepLabel">+1</span> pro Tipp</div>
+      </div>
+    </div>
 
-  <div id="sleepScoreCard"></div>
+    <div class="chips" id="repChips"></div>
+    <button class="undo-btn" onclick="undoLast()">↩ Letzte Eingabe rückgängig</button>
+  </main>
 
-  <div class="card">
-    <div class="card-title">SCHLAF ERFASSEN</div>
-    <div class="input-row">
+  <!-- Einstellungen -->
+  <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+    <div class="modal">
+      <div class="modal-title">Einstellungen</div>
       <div class="input-group">
-        <label class="input-label">Datum</label>
-        <input type="date" class="input-field" id="sleepDate">
+        <label class="input-label">Tagesziel (Klimmzüge)</label>
+        <input type="number" class="input-field" id="setGoal" min="1" max="9999" inputmode="numeric">
       </div>
       <div class="input-group">
-        <label class="input-label">Qualität</label>
-        <select class="input-field" id="sleepQuality">
-          <option value="5">★★★★★ Perfekt</option>
-          <option value="4">★★★★☆ Gut</option>
-          <option value="3" selected>★★★☆☆ Mittel</option>
-          <option value="2">★★☆☆☆ Schlecht</option>
-          <option value="1">★☆☆☆☆ Sehr schlecht</option>
-        </select>
+        <label class="input-label">Gewichtsschritt (kg)</label>
+        <input type="number" class="input-field" id="setStep" min="0.5" max="50" step="0.5" inputmode="decimal">
       </div>
-    </div>
-    <div class="input-row-3">
-      <div class="input-group">
-        <label class="input-label">Schlafen um</label>
-        <input type="time" class="input-field" id="sleepBedtime" value="22:30">
-      </div>
-      <div class="input-group">
-        <label class="input-label">Aufwachen</label>
-        <input type="time" class="input-field" id="sleepWakeup" value="06:30">
-      </div>
-      <div class="input-group">
-        <label class="input-label">HRV (opt.)</label>
-        <input type="number" class="input-field" id="sleepHRV" placeholder="ms" min="0" max="200">
-      </div>
-    </div>
-    <div class="input-group">
-      <label class="input-label">Notizen</label>
-      <input type="text" class="input-field" id="sleepNotes" placeholder="Wie hast du dich gefühlt?">
-    </div>
-    <button class="btn btn-primary" onclick="saveSleepEntry()">SCHLAF SPEICHERN</button>
-  </div>
+      <button class="btn btn-primary" onclick="saveSettings()">SPEICHERN</button>
 
-  <div id="sleepStats"></div>
-
-  <div class="card coach-card">
-    <div class="coach-header"><span class="coach-icon">⚡</span><div class="card-title" style="margin:0">KI TRAINER</div></div>
-    <div id="sleepCoachContent"><div class="coach-tip-empty">Tracke deinen Schlaf für Tipps!</div></div>
+      <div class="divider"></div>
+      <div class="card-title">iOS WIDGET</div>
+      <p class="hint">Dein persönlicher Widget-Token (für Kurzbefehle, siehe WIDGET.md). Nicht weitergeben.</p>
+      <div id="tokenBox"></div>
+      <button class="btn btn-secondary" style="margin-top:12px;" onclick="closeSettings()">Schließen</button>
+    </div>
   </div>
 </div>
-
-</div><!-- end appScreen -->
 
 <div class="toast" id="toast" style="display:none;"></div>
 
