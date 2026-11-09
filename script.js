@@ -224,8 +224,80 @@ function render() {
   document.getElementById('maxUnit').style.display = maxW === null ? 'none' : 'inline';
   document.getElementById('curWeight').textContent = (curWeight > 0 ? '+' : '') + fmt(curWeight);
   document.getElementById('repStepLabel').textContent = '+' + settings.repStep;
+  renderStreak();
   document.getElementById('repChips').innerHTML = [1, 2, 3, 5, 10].map(n =>
     `<button class="chip ${settings.repStep === n ? 'active' : ''}" onclick="setRepStep(${n})">${n}</button>`).join('');
+}
+
+// ---------- Tabs ----------
+function switchTab(name) {
+  document.querySelectorAll('.bn-tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
+  document.querySelectorAll('#appScreen .view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  window.scrollTo(0, 0);
+}
+
+// ---------- Streak ----------
+let calOffset = 0; // Monate relativ zu heute
+function dateAdd(str, n) {
+  const [y, m, d] = str.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  const p = x => String(x).padStart(2, '0');
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+function dayTotals() {
+  const t = {};
+  logs.forEach(l => { if (l.reps > 0) t[l.date] = (t[l.date] || 0) + l.reps; });
+  return t;
+}
+function calMove(d) { calOffset = Math.min(0, calOffset + d); renderStreak(); }
+function renderStreak() {
+  const el = document.getElementById('calGrid');
+  if (!el) return;
+  const totals = dayTotals();
+  const goal = settings.goal;
+  const hit = d => (totals[d] || 0) >= goal;
+  const today = todayStr();
+
+  // aktuelle Serie (heute zählt erst, wenn erreicht – bricht aber nicht, solange der Tag läuft)
+  let cur = 0;
+  let d = hit(today) ? today : dateAdd(today, -1);
+  while (hit(d)) { cur++; d = dateAdd(d, -1); }
+
+  // längste Serie + Gesamtzahl
+  const days = Object.keys(totals).filter(hit).sort();
+  let best = 0, run = 0, prev = null;
+  days.forEach(x => {
+    run = (prev && dateAdd(prev, 1) === x) ? run + 1 : 1;
+    best = Math.max(best, run); prev = x;
+  });
+  const monthPrefix = today.slice(0, 7);
+  const monthCount = days.filter(x => x.startsWith(monthPrefix)).length;
+
+  document.getElementById('streakCur').textContent = cur;
+  document.getElementById('streakBest').textContent = Math.max(best, cur);
+  document.getElementById('streakTotal').textContent = days.length;
+  document.getElementById('streakMonth').textContent = monthCount;
+  document.getElementById('streakHint').textContent = hit(today)
+    ? 'Heute geschafft 🎉'
+    : `Heute noch ${goal - (totals[today] || 0)} Reps bis zum Ziel`;
+
+  // Kalender
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() + calOffset, 1);
+  const y = first.getFullYear(), m = first.getMonth();
+  document.getElementById('calTitle').textContent =
+    first.toLocaleDateString('de-AT', { month: 'long', year: 'numeric' });
+  const lead = (first.getDay() + 6) % 7; // Montag zuerst
+  const dim = new Date(y, m + 1, 0).getDate();
+  const p = x => String(x).padStart(2, '0');
+  let html = '<span></span>'.repeat(lead);
+  for (let i = 1; i <= dim; i++) {
+    const ds = `${y}-${p(m + 1)}-${p(i)}`;
+    const reps = totals[ds] || 0;
+    const cls = hit(ds) ? 'done' : reps > 0 ? 'part' : '';
+    html += `<span class="cal-day ${cls} ${ds === today ? 'today' : ''}" title="${reps} Reps">${i}</span>`;
+  }
+  el.innerHTML = html;
 }
 
 // ---------- Init ----------

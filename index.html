@@ -56,7 +56,7 @@
   </div>
   <div id="userMenuOverlay" onclick="hideUserMenu()" style="display:none;position:fixed;inset:0;z-index:149;"></div>
 
-  <main class="simple-main">
+  <main class="simple-main view active" id="view-train">
     <!-- Fortschritt heute -->
     <div class="goal-card">
       <div class="goal-top">
@@ -91,6 +91,35 @@
     <div class="chips" id="repChips"></div>
     <button class="undo-btn" onclick="undoLast()">↩ Letzte Eingabe rückgängig</button>
   </main>
+
+  <main class="simple-main view" id="view-streak">
+    <div class="streak-hero">
+      <div class="streak-flame">🔥</div>
+      <div class="streak-num" id="streakCur">0</div>
+      <div class="streak-label">TAGE IN FOLGE</div>
+      <div class="streak-hint" id="streakHint"></div>
+    </div>
+    <div class="streak-stats">
+      <div class="streak-stat"><div class="ss-val" id="streakBest">0</div><div class="ss-label">LÄNGSTE SERIE</div></div>
+      <div class="streak-stat"><div class="ss-val" id="streakTotal">0</div><div class="ss-label">ZIEL ERREICHT</div></div>
+      <div class="streak-stat"><div class="ss-val" id="streakMonth">0</div><div class="ss-label">DIESEN MONAT</div></div>
+    </div>
+    <div class="cal-card">
+      <div class="cal-head">
+        <button class="cal-nav" onclick="calMove(-1)">‹</button>
+        <span id="calTitle"></span>
+        <button class="cal-nav" onclick="calMove(1)">›</button>
+      </div>
+      <div class="cal-grid cal-dow"><span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span></div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-legend"><span><i class="dot dot-done"></i>Ziel erreicht</span><span><i class="dot dot-part"></i>Teilweise</span></div>
+    </div>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="bn-tab active" data-view="train" onclick="switchTab('train')"><span>💪</span>TRAINING</button>
+    <button class="bn-tab" data-view="streak" onclick="switchTab('streak')"><span>🔥</span>STREAK</button>
+  </nav>
 
   <!-- Einstellungen -->
   <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
