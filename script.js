@@ -10,6 +10,7 @@ let currentUser = null;
 let logs = [];            // pullup_log, neueste zuerst
 let settings = { goal: 100, step: 2.5, repStep: 1 };
 let isLoading = false;
+let logsLoaded = false;   // erst nach dem ersten Laden animieren
 
 // ---------- Helpers ----------
 function todayStr() {
@@ -156,7 +157,7 @@ async function loadLogs() {
   } catch (e) {
     showToast('⚠️ ' + (e.message || 'Offline'), 3000);
   } finally {
-    isLoading = false; setSyncing(false); render();
+    isLoading = false; setSyncing(false); render(); logsLoaded = true;
   }
 }
 
@@ -189,6 +190,8 @@ async function insertLog(reps, weight) {
 function addReps() {
   if (!currentUser) return;
   if (navigator.vibrate) navigator.vibrate(10);
+  const c = document.getElementById('clicker');
+  c.classList.remove('press'); void c.offsetWidth; c.classList.add('press');
   const { curWeight } = stats();
   insertLog(settings.repStep, curWeight);
 }
@@ -224,9 +227,61 @@ function render() {
   document.getElementById('maxUnit').style.display = maxW === null ? 'none' : 'inline';
   document.getElementById('curWeight').textContent = (curWeight > 0 ? '+' : '') + fmt(curWeight);
   document.getElementById('repStepLabel').textContent = '+' + settings.repStep;
+  renderPlates(curWeight);
+  renderDigits(todayReps);
   renderStreak();
   document.getElementById('repChips').innerHTML = [1, 2, 3, 5, 10].map(n =>
     `<button class="chip ${settings.repStep === n ? 'active' : ''}" onclick="setRepStep(${n})">${n}</button>`).join('');
+}
+
+// ---------- Gewichtsscheiben auf dem Ständer ----------
+const MAX_PLATES = 12;
+function renderPlates(w) {
+  const box = document.getElementById('pinPlates');
+  if (!box) return;
+  let n = w > 0 ? Math.max(1, Math.round(w / settings.step)) : 0;
+  const visible = Math.min(n, MAX_PLATES);
+  box.style.setProperty('--h', Math.min(6, 51 / Math.max(visible, 1)) + 'cqw');
+  const more = document.getElementById('plateMore');
+  more.textContent = n > MAX_PLATES ? '×' + n : '';
+
+  const live = [...box.querySelectorAll('.plate:not(.lifting)')];
+  const diff = visible - live.length;
+  const animate = logsLoaded && Math.abs(diff) === 1;
+  if (diff > 0) {
+    for (let i = live.length; i < visible; i++) {
+      const p = document.createElement('span');
+      p.className = 'plate' + (animate ? ' drop' : '');
+      p.style.setProperty('--i', i);
+      box.appendChild(p);
+    }
+    if (animate) {
+      if (navigator.vibrate) setTimeout(() => navigator.vibrate(15), 340);
+      const sc = document.getElementById('pinScene');
+      setTimeout(() => { sc.classList.remove('thud'); void sc.offsetWidth; sc.classList.add('thud'); }, 340);
+    }
+  } else if (diff < 0) {
+    live.slice(visible).forEach(p => {
+      if (animate) {
+        p.classList.remove('drop'); p.classList.add('lifting');
+        setTimeout(() => p.remove(), 380);
+      } else p.remove();
+    });
+  }
+}
+
+// ---------- Klick-Zähler ----------
+function renderDigits(n) {
+  const win = document.getElementById('clkDigits');
+  if (!win) return;
+  if (!win.children.length) {
+    win.innerHTML = Array.from({ length: 4 }, () =>
+      `<span class="clk-digit"><span class="clk-strip">${[...'0123456789'].map(d => `<span>${d}</span>`).join('')}</span></span>`).join('');
+  }
+  const s = String(Math.min(9999, Math.max(0, n))).padStart(4, '0');
+  [...win.querySelectorAll('.clk-strip')].forEach((st, i) => {
+    st.style.transform = `translateY(-${s[i] * 10}%)`;
+  });
 }
 
 // ---------- Tabs ----------
@@ -294,11 +349,62 @@ function renderStreak() {
   for (let i = 1; i <= dim; i++) {
     const ds = `${y}-${p(m + 1)}-${p(i)}`;
     const reps = totals[ds] || 0;
-    const cls = hit(ds) ? 'done' : reps > 0 ? 'part' : '';
-    html += `<span class="cal-day ${cls} ${ds === today ? 'today' : ''}" title="${reps} Reps">${i}</span>`;
+    const future = ds > today;
+    const pct = Math.min(100, Math.round(reps / goal * 100));
+    const cls = future ? 'future' : hit(ds) ? 'done' : reps > 0 ? 'part' : '';
+    html += future
+      ? `<span class="cal-day future">${i}</span>`
+      : `<button class="cal-day ${cls} ${ds === today ? 'today' : ''}" style="--p:${pct}%" onclick="openDay('${ds}')" aria-label="${i}.: ${reps} Reps">${i}</button>`;
   }
   el.innerHTML = html;
 }
+
+// ---------- Tagesdetail ----------
+function openDay(ds) {
+  const entries = logs.filter(l => l.date === ds && l.reps > 0);
+  const total = entries.reduce((a, l) => a + l.reps, 0);
+  const goal = settings.goal;
+  const done = total >= goal;
+  const [y, m, d] = ds.split('-').map(Number);
+  document.getElementById('dayDate').textContent =
+    new Date(y, m - 1, d).toLocaleDateString('de-AT', { weekday: 'long', day: 'numeric', month: 'long' });
+  document.getElementById('dayStatus').textContent = done ? 'Ziel erreicht 🎉'
+    : total ? `Noch ${goal - total} bis zum Ziel` : 'Kein Training';
+  document.getElementById('dayStatus').className = 'day-status' + (done ? ' ok' : '');
+  document.getElementById('dayReps').textContent = total;
+  document.getElementById('dayGoal').textContent = '/ ' + goal;
+
+  const ring = document.getElementById('dayRingFill');
+  const C = 2 * Math.PI * 52;
+  ring.style.strokeDasharray = C;
+  ring.style.strokeDashoffset = C;
+  ring.classList.toggle('ok', done);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    ring.style.strokeDashoffset = C * (1 - Math.min(1, total / goal));
+  }));
+
+  document.getElementById('daySets').textContent = entries.length;
+  const maxW = entries.length ? Math.max(...entries.map(l => l.weight)) : null;
+  document.getElementById('dayMaxW').textContent = maxW === null ? '–' : (maxW > 0 ? '+' : '') + fmt(maxW) + ' kg';
+  const times = entries.map(l => new Date(l.created)).filter(t => !isNaN(t)).sort((a, b) => a - b);
+  const tf = t => t.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('dayTime').textContent = !times.length ? '–'
+    : tf(times[0]) === tf(times[times.length - 1]) ? tf(times[0]) : `${tf(times[0])}–${tf(times[times.length - 1])}`;
+
+  // Aufteilung nach Gewicht
+  const byW = {};
+  entries.forEach(l => { byW[l.weight] = (byW[l.weight] || 0) + l.reps; });
+  const rows = Object.entries(byW).map(([w, r]) => [parseFloat(w), r]).sort((a, b) => b[0] - a[0]);
+  const top = Math.max(1, ...rows.map(r => r[1]));
+  document.getElementById('dayBreak').innerHTML = rows.length ? `<div class="day-sec">NACH GEWICHT</div>` +
+    rows.map(([w, r]) => `<div class="db-row">
+      <span class="db-w">${w > 0 ? '+' : ''}${fmt(w)} kg</span>
+      <span class="db-bar"><i style="width:${r / top * 100}%"></i></span>
+      <span class="db-r">${r}</span></div>`).join('') : '';
+
+  document.getElementById('dayModal').classList.add('open');
+}
+function closeDay() { document.getElementById('dayModal').classList.remove('open'); }
 
 // ---------- Init ----------
 document.addEventListener('DOMContentLoaded', () => {
@@ -306,7 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
   render();
   db.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_OUT' || !session?.user) {
-      currentUser = null; logs = [];
+      currentUser = null; logs = []; logsLoaded = false;
       document.getElementById('appScreen').style.display = 'none';
       document.getElementById('authScreen').style.display = 'flex';
       document.getElementById('authBtn').dataset.mode = 'login';

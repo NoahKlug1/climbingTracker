@@ -1,5 +1,5 @@
 // CrimpLog SW v2.1 – network-first, offline fallback
-const CACHE = 'crimplog-v21';
+const CACHE = 'crimplog-v22';
 const OFFLINE_URLS = ['./index.html', './style.css', './script.js', './manifest.json'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(OFFLINE_URLS))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

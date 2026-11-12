@@ -75,14 +75,30 @@
     <!-- Plus-Buttons -->
     <div class="plus-row">
       <div class="plus-col">
-        <button class="plus-btn plus-weight" onclick="addWeight(1)" aria-label="Gewicht erhöhen">+</button>
+        <button class="plus-btn plus-weight scene-btn" onclick="addWeight(1)" aria-label="Gewicht erhöhen">
+          <span class="add-badge">+</span>
+          <span class="pin-scene" id="pinScene">
+            <span class="pin-rod"><span class="pin-eye"></span><span class="pin-logo"></span></span>
+            <span class="pin-plates" id="pinPlates"></span>
+            <span class="pin-base"></span>
+            <span class="pin-cork"></span>
+          </span>
+          <span class="plate-more" id="plateMore"></span>
+        </button>
         <div class="plus-caption">GEWICHT</div>
         <div class="plus-sub"><span id="curWeight">0</span> kg
           <button class="mini-minus" onclick="addWeight(-1)" aria-label="Gewicht verringern">−</button>
         </div>
       </div>
       <div class="plus-col">
-        <button class="plus-btn plus-reps" onclick="addReps()" aria-label="Reps hinzufügen">+</button>
+        <button class="plus-btn plus-reps scene-btn" onclick="addReps()" aria-label="Reps hinzufügen">
+          <span class="clicker" id="clicker">
+            <span class="clk-ring"></span>
+            <span class="clk-press"><span class="clk-stem"></span><span class="clk-plunger"></span></span>
+            <span class="clk-knob"></span>
+            <span class="clk-body"><span class="clk-window" id="clkDigits"></span></span>
+          </span>
+        </button>
         <div class="plus-caption">REPS</div>
         <div class="plus-sub"><span id="repStepLabel">+1</span> pro Tipp</div>
       </div>
@@ -112,9 +128,35 @@
       </div>
       <div class="cal-grid cal-dow"><span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span></div>
       <div class="cal-grid" id="calGrid"></div>
-      <div class="cal-legend"><span><i class="dot dot-done"></i>Ziel erreicht</span><span><i class="dot dot-part"></i>Teilweise</span></div>
+      <div class="cal-legend"><span><i class="dot dot-done"></i>Ziel erreicht</span><span><i class="dot dot-part"></i>Fortschritt</span><span class="cal-tip">Tag antippen für Details</span></div>
     </div>
   </main>
+
+  <!-- Tagesdetail -->
+  <div class="modal-overlay" id="dayModal" onclick="if(event.target===this)closeDay()">
+    <div class="modal day-modal">
+      <div class="day-head">
+        <div>
+          <div class="day-date" id="dayDate"></div>
+          <div class="day-status" id="dayStatus"></div>
+        </div>
+        <button class="day-close" onclick="closeDay()" aria-label="Schließen">✕</button>
+      </div>
+      <div class="day-ring-wrap">
+        <svg viewBox="0 0 120 120" class="day-ring">
+          <circle cx="60" cy="60" r="52" class="dr-track"/>
+          <circle cx="60" cy="60" r="52" class="dr-fill" id="dayRingFill"/>
+        </svg>
+        <div class="day-ring-txt"><div class="drt-val" id="dayReps">0</div><div class="drt-sub" id="dayGoal">/ 100</div></div>
+      </div>
+      <div class="day-stats">
+        <div class="day-stat"><div class="ds-val" id="daySets">0</div><div class="ds-label">EINGABEN</div></div>
+        <div class="day-stat"><div class="ds-val" id="dayMaxW">–</div><div class="ds-label">MAX GEWICHT</div></div>
+        <div class="day-stat"><div class="ds-val" id="dayTime">–</div><div class="ds-label">ZEITRAUM</div></div>
+      </div>
+      <div id="dayBreak"></div>
+    </div>
+  </div>
 
   <nav class="bottom-nav">
     <button class="bn-tab active" data-view="train" onclick="switchTab('train')"><span>💪</span>TRAINING</button>
